@@ -1,0 +1,118 @@
+.login-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #F5F5F5;
+}
+
+.login-card {
+    width: 380px;
+    background: white;
+    padding: 32px;
+    border-radius: 12px;
+    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.1);
+    border: 1px solid #E0E0E0;
+}
+
+.login-title {
+    text-align: center;
+    margin-bottom: 24px;
+    font-size: 26px;
+    color: #2C2C2C;
+}
+
+.form-group {
+    margin-bottom: 16px;
+    font-size: 14px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 4px;
+    color: #2C2C2C;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid #D1D5DB;
+    font-size: 14px;
+}
+
+.error-text {
+    color: red;
+    font-size: 13px;
+    margin-bottom: 12px;
+}
+
+.login-button {
+    width: 100%;
+    padding: 10px 0;
+    border-radius: 8px;
+    border: none;
+    background: #F2C94C;
+    color: black;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.login-button:hover {
+    background: #D4A017;
+}
+
+.test-info {
+    margin-top: 16px;
+    font-size: 12px;
+    color: #6b7280;
+}
+
+/* === HASTA SORGULA FORMU (SIDEBAR) === */
+
+.search-form {
+    margin-top: 12px;
+    padding: 12px;
+    background: #2d2d2d;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.search-input {
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #444;
+    background: #1f1f1f;
+    color: white;
+    font-size: 13px;
+    outline: none;
+}
+
+.search-input::placeholder {
+    color: #9ca3af;
+}
+
+.search-input:focus {
+    border-color: #f2c94c;
+    box-shadow: 0 0 0 2px rgba(242, 201, 76, 0.3);
+}
+
+.search-button {
+    padding: 10px;
+    border-radius: 8px;
+    background: #4f46e5;
+    border: none;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.15s;
+    font-size: 13px;
+}
+
+.search-button:hover {
+    background: #4338ca;
+}
