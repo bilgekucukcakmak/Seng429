@@ -1,110 +1,116 @@
-// src/services/api.js
+import axios from 'axios';
 
-// Şimdilik backend yoksa bile sorun çıkarmasın diye
-// MOCK veriyle çalışan bir loginRequest yazıyoruz.
-// Arkadaşların backend yazınca burayı fetch ile değiştirebiliriz.
+// Backend API'nizin adresi
+const API_URL = 'http://localhost:5001/api';
 
-const API_BASE = "http://localhost:8080/api";
-// Şimdilik kullanmıyoruz ama backend gelince işimize yarar :)
+const api = axios.create({
+    baseURL: API_URL,
+    headers: {
+        'Content-Type': 'application/json',
+    },
+});
 
-// 🔹 LOGIN – hem mock, hem backend'e hazır
-export async function loginRequest(username, password, role) {
-    // --- MOCK (backend yoksa) ---
-    const MOCK_USERS = [
-        { id: 1, username: "admin", password: "1234", role: "admin" },
-        { id: 2, username: "doktor1", password: "1234", role: "doctor" },
-        { id: 3, username: "hasta1", password: "1234", role: "patient" },
-    ];
-
-    const found = MOCK_USERS.find(
-        (u) =>
-            u.username === username.trim() &&
-            u.password === password &&
-            u.role === role
-    );
-
-    if (!found) {
-        throw new Error("Kullanıcı adı / şifre / rol hatalı.");
+// --- JWT TOKEN YÖNETİMİ ---
+export const setAuthToken = (token) => {
+    if (token) {
+        // Tüm isteklere Authorization başlığını ekle
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        localStorage.setItem('token', token);
+    } else {
+        // Token'ı kaldır
+        delete api.defaults.headers.common['Authorization'];
+        localStorage.removeItem('token');
     }
+};
 
-    // Burada normalde backend'den dönen user objesini döndürmüş olacağız.
-    // Şimdilik mock user dönüyoruz.
-    return found;
-
-    /*
-    // --- BACKEND EKLENDİĞİNDE ŞÖYLE OLABİLİR ---
-    const res = await fetch(`${API_BASE}/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, role }),
-    });
-  
-    if (!res.ok) {
-      throw new Error("Giriş başarısız.");
+export const initializeAuthToken = () => {
+    const token = localStorage.getItem('token');
+    if (token) {
+        setAuthToken(token); // Token varsa ayarla
+        return true;
     }
-  
-    const data = await res.json();
-    return data;
-    */
+    return false;
+};
+
+// --- AUTH FONKSİYONLARI ---
+export async function loginRequest(email, password, role) {
+    try {
+        const response = await api.post('/auth/login', { email, password });
+        const { token, role: returnedRole, userId } = response.data;
+
+        if (returnedRole !== role) {
+             throw new Error("Kullanıcı rolü hatalı.");
+        }
+
+        setAuthToken(token);
+        localStorage.setItem('userRole', returnedRole);
+        localStorage.setItem('userId', userId);
+        localStorage.setItem('username', email);
+
+        return { id: userId, email, role: returnedRole };
+
+    } catch (error) {
+        const errorMessage = error.response?.data || "Giriş başarısız oldu. Sunucu hatası.";
+        throw new Error(errorMessage);
+    }
 }
 
-// 🔹 Doktor bugünkü randevuları – şimdilik boş liste dönsün
-export async function getDoctorTodayAppointments(doctorId) {
-    // Backend gelene kadar boş array dönüyoruz ki component patlamasın
-    return [];
-    /*
-    const res = await fetch(`${API_BASE}/doctors/${doctorId}/appointments/today`);
-    if (!res.ok) throw new Error("Randevular alınamadı.");
-    return await res.json();
-    */
+export async function register(userData) {
+    try {
+        const response = await api.post('/auth/register', userData);
+        return response.data;
+    } catch (error) {
+        const errorMessage = error.response?.data || "Kayıt başarısız oldu. Sunucu hatası.";
+        throw new Error(errorMessage);
+    }
 }
 
-// 🔹 Hasta tarafı için fonksiyonlar – şimdilik hepsi boş veri dönsün
 
-export async function getPatientClinics() {
-    // Örnek mock veri:
-    return [
-        { id: 1, name: "Kardiyoloji" },
-        { id: 2, name: "Dahiliye" },
-        { id: 3, name: "Nöroloji" },
-    ];
-    /*
-    const res = await fetch(`${API_BASE}/clinics`);
-    if (!res.ok) throw new Error("Poliklinikler alınamadı.");
-    return await res.json();
-    */
-}
+// *************** ADMIN VE YÖNETİM FONKSİYONLARI ***************
 
-export async function getPatientAppointments(patientId) {
-    return [];
-    /*
-    const res = await fetch(`${API_BASE}/patients/${patientId}/appointments`);
-    if (!res.ok) throw new Error("Randevular alınamadı.");
-    return await res.json();
-    */
-}
+// Tüm kullanıcıları getir (Doktor, Hasta, Admin)
+export const getAllUsers = () => api.get('/admin/users');
 
-export async function getPatientHistory(patientId) {
-    return [];
-    /*
-    const res = await fetch(`${API_BASE}/patients/${patientId}/history`);
-    if (!res.ok) throw new Error("Geçmiş alınamadı.");
-    return await res.json();
-    */
-}
+// Kullanıcı silme
+export const deleteUser = (userId) => api.delete(`/admin/users/${userId}`);
 
-export async function createAppointment(payload) {
-    console.log("Randevu oluştur (mock):", payload);
-    // Sanki backend'e kaydetmişiz gibi davranalım:
-    return { success: true };
-    /*
-    const res = await fetch(`${API_BASE}/appointments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-  
-    if (!res.ok) throw new Error("Randevu oluşturulamadı.");
-    return await res.json();
-    */
-}
+// Poliklinik listesini getir
+export const getSpecializations = () => api.get('/admin/specializations');
+
+// Genel sistem raporlarını getir
+export const getGeneralReports = () => api.get('/admin/reports');
+
+/**
+ * Mevcut doktorun bilgilerini günceller (AdminPage'den çağrılır).
+ * @param {number} userId - Güncellenecek doktorun ID'si
+ * @param {object} data - Güncel kullanıcı bilgileri (email, first_name, title, specialization vb.)
+ */
+export const updateDoctor = async (userId, data) => {
+    try {
+        // Backend'de bu rotanın PUT/PATCH '/admin/doctor/:userId' şeklinde olması beklenir.
+        const response = await api.put(`/admin/doctor/${userId}`, data);
+        return response.data;
+    } catch (error) {
+        const errorMessage = error.response?.data?.message || "Doktor bilgileri güncellenirken sunucu hatası oluştu.";
+        throw new Error(errorMessage);
+    }
+};
+
+
+// *************** HASTA FONKSİYONLARI ***************
+export const getPatientProfile = () => api.get('/patients/profile');
+export const updatePatientProfile = (data) => api.patch('/patients/profile', data);
+export const getPatientByTc = (tc) => api.get(`/patients/search`, { params: { tc } });
+export const getPatientAppointments = () => api.get(`/appointments/patient`);
+
+
+// *************** DOKTOR FONKSİYONLARI ***************
+export const getAllDoctors = () => api.get('/doctors');
+export const getDoctorAppointments = (doctorId) => api.get(`/appointments/doctor/${doctorId}`); // Doktor randevularını çek (örnek rota)
+export const createAppointment = (payload) => api.post('/appointments', payload);
+export const updateAppointmentStatus = (appointmentId, status, note) => {
+    return api.patch(`/appointments/${appointmentId}`, { status, note });
+};
+
+
+export default api;

@@ -213,6 +213,18 @@
     background: #fecaca;
 }
 
+/* YENİ EKLENEN CHIP-INFO STİLİ (Düzenle butonu için) */
+.chip-info {
+    background: #d1ecf1; /* Açık mavi/turkuaz arka plan */
+    color: #0c5460; /* Koyu metin */
+}
+
+.chip-info:hover {
+    background: #c3e6f5; /* Daha açık hover rengi */
+    transform: translateY(-1px);
+}
+
+
 /* === TABLO STİLİ ================================================================== */
 
 .admin-table {
@@ -630,4 +642,125 @@
 
 .patient-appointments-table tr:last-child td {
     border-bottom: none;
+}
+/* === DOKTOR DETAY MODALI VE AKSİYON BUTONLARI İÇİN EKLENEN STİLLER === */
+
+/* --- Modal Düzeltmeleri/Genişletmeleri --- */
+/* Zaten var olan .modal-backdrop ve .modal-card yerine, DoctorPage'de kullanılan isimleri tanımlayalım */
+
+.modal-backdrop {
+    /* (Zaten tanımlı, ekleme yapmaya gerek yok) */
+}
+
+.modal {
+    /* Genel modal container'ı */
+    background: white;
+    padding: 24px;
+    border-radius: 12px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+    width: 90%;
+    max-width: 750px; /* Geniş detaylar için genişletildi */
+    max-height: 90vh;
+    overflow-y: auto;
+    z-index: 50; /* Z index'i mevcut modal'den yüksek olabilir, emin olmak için 50 verelim */
+}
+
+/* Detay grid'i (Hasta Bilgileri ve Randevu Bilgileri) */
+.detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin-top: 15px;
+}
+
+.detail-section {
+    padding: 10px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+}
+
+.detail-section h4 {
+    font-size: 15px;
+    font-weight: 700;
+    border-bottom: 2px solid #eee;
+    padding-bottom: 5px;
+    margin-bottom: 10px;
+    color: #4a4a4a;
+}
+
+.detail-section p {
+    font-size: 13px;
+    margin-bottom: 4px;
+    line-height: 1.4;
+}
+
+.detail-section strong {
+    font-weight: 600;
+    color: #333;
+    display: inline-block;
+    width: 110px; /* Label'lar için sabit genişlik */
+}
+
+
+/* Modal Aksiyonları (Not Kaydet/Tamamla/Kapat) */
+.modal-actions {
+    margin-top: 20px;
+    display: flex;
+    justify-content: flex-end; /* Sağ tarafa yasla */
+    gap: 10px;
+}
+
+.modal-button {
+    padding: 10px 15px;
+    border-radius: 8px; /* Daha köşeli bir görünüm */
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.modal-save {
+    background: #28a745; /* Yeşil - Notu Kaydet */
+    color: white;
+}
+
+.modal-complete {
+    background: #007bff; /* Mavi - Tamamla */
+    color: white;
+}
+
+/* Modal kapatma (Zaten var, stilini güncelleyelim) */
+.modal-cancel {
+    background: #6c757d; /* Gri */
+    color: white;
+}
+
+/* --- Doktor Listesi İşlem Butonları (Detay/Tamamla/İptal) --- */
+.action-button {
+    padding: 5px 10px;
+    margin-left: 5px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 600;
+    transition: opacity 0.2s;
+}
+
+.action-button:hover {
+    opacity: 0.8;
+}
+
+.details-button {
+    background-color: #ffc107; /* Sarı */
+    color: #111827;
+}
+.complete-button {
+    background-color: #28a745; /* Yeşil */
+    color: white;
+}
+.cancel-button {
+    background-color: #dc3545; /* Kırmızı */
+    color: white;
 }
