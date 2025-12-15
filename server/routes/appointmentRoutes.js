@@ -1,4 +1,4 @@
-// server/routes/appointmentRoutes.js (SADECE YÖNLENDİRME)
+// server/routes/appointmentRoutes.js (NİHAİ VE TAM HALİ)
 
 import express from 'express';
 // Controller'ı import et
@@ -15,11 +15,11 @@ const router = express.Router();
 router.post('/', createAppointment);
 
 // 2. Hastanın Randevularını Çekme (GET /api/appointments/patient)
-// JWT kullanıldığı için artık URL'den userId çekmeye gerek yok, token'dan alıyoruz.
+// JWT kullanıldığı için user ID token'dan alınır.
 router.get('/patient', getPatientAppointments);
 
 // 3. Doktorun Randevularını Çekme (GET /api/appointments/doctor)
-// JWT kullanıldığı için artık URL'den userId çekmeye gerek yok, token'dan alıyoruz.
+// JWT kullanıldığı için user ID token'dan alınır.
 router.get('/doctor', getDoctorAppointments);
 
 // 4. Randevu Durumunu/Notunu Güncelleme (PATCH /api/appointments/:id)

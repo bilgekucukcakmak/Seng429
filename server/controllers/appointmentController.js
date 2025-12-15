@@ -1,3 +1,5 @@
+// server/controllers/appointmentController.js (NİHAİ VE TAM HALİ - İzin Kontrolü Eklendi)
+
 import pool from '../db.js';
 
 // --- Yardımcı Fonksiyonlar ---
@@ -30,6 +32,30 @@ export const createAppointment = async (req, res) => {
         if (!patientId) {
             return res.status(404).send('Hasta kaydı bulunamadı.');
         }
+
+        // --- YENİ KONTROL 1: İzin Kontrolü ---
+        const appointmentDateShort = new Date(appointmentDate).toISOString().split('T')[0]; // Sadece tarihi al (YYYY-MM-DD)
+
+        // Doktorun izinli günlerini veritabanından çek
+        const [doctorResult] = await pool.execute(
+            'SELECT leave_dates FROM doctors WHERE id = ?',
+            [doctorId]
+        );
+
+        if (doctorResult.length > 0 && doctorResult[0].leave_dates) {
+            try {
+                const leaveDates = JSON.parse(doctorResult[0].leave_dates);
+
+                // Eğer randevu tarihi, izin listesinde varsa reddet
+                if (Array.isArray(leaveDates) && leaveDates.includes(appointmentDateShort)) {
+                    return res.status(400).send('Seçilen doktor bu tarihte izinlidir. Lütfen başka bir tarih seçin.');
+                }
+            } catch (jsonError) {
+                console.error("İzin tarihi JSON parse hatası:", jsonError);
+                // JSON parse edilemezse devam et, hata vermesin.
+            }
+        }
+        // --- KONTROL SONU ---
 
         if (new Date(appointmentDate) < new Date()) {
             return res.status(400).send('Randevu tarihi geçmiş bir tarih olamaz.');
@@ -92,13 +118,12 @@ export const getPatientAppointments = async (req, res) => {
 // 3. Doktorun Güncel Randevularını Çekme (GET /api/appointments/doctor)
 export const getDoctorAppointments = async (req, res) => {
     const doctorUserId = req.user.id;
-    const today = new Date().toISOString().split('T')[0];
 
     try {
         const doctorId = await getDoctorId(doctorUserId);
 
         if (!doctorId) {
-            return res.status(404).send('Doktor kaydı bulunamadı.');
+            return res.status(200).json([]);
         }
 
         const [appointments] = await pool.execute(
@@ -115,10 +140,8 @@ export const getDoctorAppointments = async (req, res) => {
             FROM appointments a
             JOIN patients p ON a.patient_id = p.id
             WHERE a.doctor_id = ?
-              AND a.status = 'scheduled'
-              AND DATE(a.appointment_date) >= ?
             ORDER BY a.appointment_date ASC`,
-            [doctorId, today]
+            [doctorId]
         );
 
         res.status(200).json(appointments);
@@ -136,18 +159,20 @@ export const updateAppointment = async (req, res) => {
     const { status, note } = req.body;
 
     try {
-        if (status === 'completed' && note !== undefined) {
+
+        if (status === 'completed' || status === 'canceled') {
+
+            const noteUpdate = (status === 'completed' && note !== undefined) ? ', doctor_note = ?' : '';
+            const params = [status, appointmentId];
+            if (noteUpdate) {
+                params.splice(1, 0, note);
+            }
+
             await pool.execute(
-                'UPDATE appointments SET status = ?, doctor_note = ? WHERE id = ?',
-                ['completed', note, appointmentId]
+                `UPDATE appointments SET status = ? ${noteUpdate} WHERE id = ?`,
+                params
             );
-        } 
-        else if (status === 'canceled') {
-            await pool.execute(
-                'UPDATE appointments SET status = ? WHERE id = ?',
-                ['canceled', appointmentId]
-            );
-        } 
+        }
         else {
             return res.status(400).send('Geçersiz durum veya eksik not.');
         }
