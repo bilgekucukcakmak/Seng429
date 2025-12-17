@@ -1,3 +1,5 @@
+// server/middleware/authMiddleware.js (Sizin Sağladığınız Doğru İçerik)
+
 import jwt from 'jsonwebtoken';
 import 'dotenv/config';
 
@@ -68,7 +70,7 @@ const ensureDoctor = (req, res, next) => {
 // 📦 EXPORT
 // =======================================================
 export {
-    ensureAuthenticated,
+    ensureAuthenticated, // <-- Rotalarda KULLANILACAK İSİM
     ensureAdmin,
     ensureDoctor
 };

@@ -1,25 +1,24 @@
 import pool from '../db.js';
 import bcrypt from 'bcryptjs';
 
-// --- Yardımcı Fonksiyon ---
+// =======================================================
+// 🔧 YARDIMCI FONKSİYON
+// =======================================================
 const getDoctorId = async (userId) => {
-    const [result] = await pool.execute(
+    const [rows] = await pool.execute(
         'SELECT id FROM doctors WHERE user_id = ?',
         [userId]
     );
-    return result[0] ? result[0].id : null;
+    return rows.length > 0 ? rows[0].id : null;
 };
-// --- Yardımcı Fonksiyon Sonu ---
-
 
 // =======================================================
-// 👨‍⚕️ TÜM DOKTORLARI LİSTELE
+// 👨‍⚕️ TÜM DOKTORLARI LİSTELE (PUBLIC)
 // =======================================================
 export const getAllDoctors = async (req, res) => {
     try {
-        const [doctors] = await pool.execute(
-            `
-            SELECT 
+        const [doctors] = await pool.execute(`
+            SELECT
                 d.id AS doctor_id,
                 d.first_name,
                 d.last_name,
@@ -27,70 +26,97 @@ export const getAllDoctors = async (req, res) => {
                 u.email
             FROM doctors d
             JOIN users u ON d.user_id = u.id
-            `
-        );
+        `);
 
         res.status(200).json(doctors);
-
     } catch (error) {
         console.error('Doktor listesi çekme hatası:', error);
         res.status(500).send('Sunucu hatası.');
     }
 };
 
-
 // =======================================================
-// 🏖️ DOKTOR İZİNLİ GÜNLERİ GÜNCELLE
+// 🏖️ DOKTOR İZİNLİ GÜNLERİ GETİR
+// GET /api/doctors/leave
 // =======================================================
-export const updateDoctorLeave = async (req, res) => {
+export const getDoctorLeaveDates = async (req, res) => {
     const doctorUserId = req.user.id;
-    const { leaveDates } = req.body;
-    const leaveDatesJson = JSON.stringify(leaveDates || []);
 
     try {
         const doctorId = await getDoctorId(doctorUserId);
 
         if (!doctorId) {
+            return res.status(404).send('Doktor bulunamadı.');
+        }
+
+        const [rows] = await pool.execute(
+            'SELECT leave_dates FROM doctors WHERE id = ?',
+            [doctorId]
+        );
+
+        const leaveDates = rows[0]?.leave_dates
+            ? JSON.parse(rows[0].leave_dates)
+            : [];
+
+        res.status(200).json(leaveDates);
+
+    } catch (error) {
+        console.error('İzinli günler getirme hatası:', error);
+        res.status(500).send('İzinli günler getirilemedi.');
+    }
+};
+
+// =======================================================
+// 🏖️ DOKTOR İZİNLİ GÜNLERİ GÜNCELLE
+// PATCH /api/doctors/leave
+// =======================================================
+export const updateDoctorLeave = async (req, res) => {
+    const { leaveDates } = req.body;
+
+    if (!Array.isArray(leaveDates)) {
+        return res.status(400).send('İzinler array (dizi) formatında olmalıdır.');
+    }
+
+    try {
+        const doctorId = await getDoctorId(req.user.id);
+
+        if (!doctorId) {
             return res.status(404).send('Doktor kaydı bulunamadı.');
         }
 
-        const [result] = await pool.execute(
+        const leaveDatesJson = JSON.stringify(leaveDates);
+
+        await pool.execute(
             'UPDATE doctors SET leave_dates = ? WHERE id = ?',
             [leaveDatesJson, doctorId]
         );
 
-        if (result.affectedRows === 0) {
-            return res.status(404).send('Güncellenecek doktor bulunamadı.');
-        }
-
-        res.status(200).send('İzinli günler başarıyla güncellendi.');
-
+        res.status(200).json({
+            message: 'İzinli günler başarıyla güncellendi.',
+            leaveDates
+        });
     } catch (error) {
         console.error('Doktor izin güncelleme hatası:', error);
         res.status(500).send('Sunucu hatası: İzinler kaydedilemedi.');
     }
 };
 
-
 // =======================================================
 // 👤 DOKTOR PROFİLİNİ GÖRÜNTÜLE
+// GET /api/doctors/profile
 // =======================================================
 export const getDoctorProfile = async (req, res) => {
-    const { id: userId, role } = req.user;
-
-    if (role !== 'doctor') {
-        return res.status(403).send('Yetkisiz erişim.');
-    }
-
     try {
+        const userId = req.user.id;
+
         const [rows] = await pool.execute(
             `
             SELECT
-                u.first_name,
-                u.last_name,
-                u.email,
-                d.specialization,
-                'Dr.' AS title
+                d.first_name AS firstName,
+                d.last_name AS lastName,
+                u.email AS email,
+                d.specialization AS specialization,
+                d.title AS title
             FROM users u
             JOIN doctors d ON d.user_id = u.id
             WHERE u.id = ?
@@ -99,60 +125,63 @@ export const getDoctorProfile = async (req, res) => {
         );
 
         if (rows.length === 0) {
-            return res.status(404).send('Doktor profili bulunamadı.');
+            return res.status(404).json({ message: 'Doktor profili bulunamadı.' });
         }
 
-        res.status(200).json(rows[0]);
-
+        res.json(rows[0]);
     } catch (error) {
         console.error('Doktor profil getirme hatası:', error);
-        res.status(500).send('Sunucu hatası.');
+        res.status(500).json({ message: 'Doktor profili alınamadı.' });
     }
 };
 
 
+
 // =======================================================
 // ✍️ DOKTOR PROFİLİNİ GÜNCELLE
+// PATCH /api/doctors/profile
 // =======================================================
 export const updateDoctorProfile = async (req, res) => {
-    const { id: userId, role } = req.user;
     const { firstName, lastName, email, password } = req.body;
-
-    if (role !== 'doctor') {
-        return res.status(403).send('Yasak: Bu işleme sadece doktorlar erişebilir.');
-    }
-
     let conn;
 
     try {
         conn = await pool.getConnection();
         await conn.beginTransaction();
 
-        // users tablosu
-        let userQuery = 'UPDATE users SET first_name = ?, last_name = ?, email = ?';
-        const userParams = [firstName, lastName, email];
+        // =========================
+        // USERS → SADECE EMAIL + PASSWORD
+        // =========================
+        let userQuery = `UPDATE users SET email = ?`;
+        const userParams = [email];
 
         if (password) {
             const hashedPassword = await bcrypt.hash(password, 10);
-            userQuery += ', password = ?';
+            userQuery += `, password_hash = ?`;
             userParams.push(hashedPassword);
         }
 
-        userQuery += ' WHERE id = ?';
-        userParams.push(userId);
+        userQuery += ` WHERE id = ?`;
+        userParams.push(req.user.id);
 
         await conn.execute(userQuery, userParams);
 
-        // doctors tablosu
+        // =========================
+        // DOCTORS → İSİMLER
+        // =========================
         await conn.execute(
-            'UPDATE doctors SET first_name = ?, last_name = ? WHERE user_id = ?',
-            [firstName, lastName, userId]
+            `
+            UPDATE doctors
+            SET first_name = ?, last_name = ?
+            WHERE user_id = ?
+            `,
+            [firstName, lastName, req.user.id]
         );
 
         await conn.commit();
         conn.release();
 
-        res.status(200).send('Profil bilgileri başarıyla güncellendi.');
+        res.status(200).json({ message: 'Profil bilgileri başarıyla güncellendi.' });
 
     } catch (error) {
         if (conn) {
@@ -161,10 +190,10 @@ export const updateDoctorProfile = async (req, res) => {
         }
 
         if (error.code === 'ER_DUP_ENTRY') {
-            return res.status(400).send('Bu e-posta adresi zaten kullanılıyor.');
+            return res.status(400).json({ message: 'Bu e-posta adresi zaten kullanılıyor.' });
         }
 
         console.error('Doktor profil güncelleme hatası:', error);
-        res.status(500).send('Sunucu hatası: Profil güncellenemedi.');
+        res.status(500).json({ message: 'Profil güncellenemedi.' });
     }
 };

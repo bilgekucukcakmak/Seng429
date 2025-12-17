@@ -3,6 +3,7 @@ import { ensureDoctor } from '../middleware/authMiddleware.js';
 
 import {
     getAllDoctors,
+    getDoctorLeaveDates,
     updateDoctorLeave,
     getDoctorProfile,
     updateDoctorProfile
@@ -12,28 +13,22 @@ const router = express.Router();
 
 // =======================================================
 // 👤 DOKTOR PROFİLİ
+// URL: /api/doctors/profile
 // =======================================================
-
-// Doktor kendi profilini görüntüler
 router.get('/profile', ensureDoctor, getDoctorProfile);
-
-// Doktor kendi profilini günceller
 router.patch('/profile', ensureDoctor, updateDoctorProfile);
-
 
 // =======================================================
 // 🏖️ DOKTOR İZİNLERİ
+// URL: /api/doctors/leave
 // =======================================================
-
-// Doktor izin günlerini günceller
+router.get('/leave', ensureDoctor, getDoctorLeaveDates);
 router.patch('/leave', ensureDoctor, updateDoctorLeave);
-
 
 // =======================================================
 // 👨‍⚕️ TÜM DOKTORLAR (PUBLIC)
+// URL: /api/doctors
 // =======================================================
-
-// Tüm doktorları listele
 router.get('/', getAllDoctors);
 
 export default router;

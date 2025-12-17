@@ -1,28 +1,41 @@
-// server/routes/appointmentRoutes.js (NİHAİ VE TAM HALİ)
+// server/routes/appointmentRoutes.js (NİHAİ VE TAM HALİ - İsimler Eşleştirildi)
 
 import express from 'express';
-// Controller'ı import et
+// Controller'ları import et
 import {
     createAppointment,
     getPatientAppointments,
     getDoctorAppointments,
-    updateAppointment
+    updateAppointment,
+    // YENİ EKLENEN: Slot çekme fonksiyonu
+    getAvailableSlots
 } from '../controllers/appointmentController.js';
+
+// YENİ EKLENEN: Auth Middleware'ı import et
+// Rotada kullanılacak doğru isim: ensureAuthenticated
+import { ensureAuthenticated } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
+// --- Randevu Slotlarını Çekme Rotası (Hasta Tarafı) ---
+// protect -> ensureAuthenticated olarak düzeltildi
+router.get('/slots/:doctorId/:date', ensureAuthenticated, getAvailableSlots);
+
+
 // 1. Randevu Oluşturma (POST /api/appointments)
-router.post('/', createAppointment);
+// protect -> ensureAuthenticated olarak düzeltildi
+router.post('/', ensureAuthenticated, createAppointment);
 
 // 2. Hastanın Randevularını Çekme (GET /api/appointments/patient)
-// JWT kullanıldığı için user ID token'dan alınır.
-router.get('/patient', getPatientAppointments);
+// protect -> ensureAuthenticated olarak düzeltildi
+router.get('/patient', ensureAuthenticated, getPatientAppointments);
 
 // 3. Doktorun Randevularını Çekme (GET /api/appointments/doctor)
-// JWT kullanıldığı için user ID token'dan alınır.
-router.get('/doctor', getDoctorAppointments);
+// protect -> ensureAuthenticated olarak düzeltildi
+router.get('/doctor', ensureAuthenticated, getDoctorAppointments);
 
 // 4. Randevu Durumunu/Notunu Güncelleme (PATCH /api/appointments/:id)
-router.patch('/:id', updateAppointment);
+// protect -> ensureAuthenticated olarak düzeltildi
+router.patch('/:id', ensureAuthenticated, updateAppointment);
 
 export default router;

@@ -8,7 +8,12 @@ import {
     getPatientByTc,
     updateAppointmentStatus,
     updateDoctorProfile, // Profil güncelleme API'si
-    getDoctorProfile
+    getDoctorProfile,
+    getDoctorLeaveDates,
+    updateDoctorLeaveDates,
+    getPatientAppointmentsByTc,
+    initializeAuthToken,
+
 } from "../services/api";
 
 // --- SABİT TANIMLAMALAR ---
@@ -64,12 +69,12 @@ export default function DoctorPage({ user, onLogout }) {
     const [loading, setLoading] = useState(false);
     const doctorUserId = user.id;
     const [activeSection, setActiveSection] = useState("panel");
-
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     // --- TAKVİM VE İZİN YÖNETİMİ STATE'LERİ ---
     const [currentWeekStart, setCurrentWeekStart] = useState(getStartOfWeek(new Date()));
     const [leaveDates, setLeaveDates] = useState([]); // İzinli günler (YYYY-MM-DD formatında)
     const [leaveDateInput, setLeaveDateInput] = useState(''); // İzin ekleme inputu
-
+    const [leaveLoading, setLeaveLoading] = useState(false);
     // --- PROFİL YÖNETİMİ STATE'LERİ (YENİ EKLENDİ) ---
     const [isEditingProfile, setIsEditingProfile] = useState(false); // YENİ STATE: Görüntüleme/Düzenleme geçişi
     const [profileData, setProfileData] = useState({
@@ -95,40 +100,85 @@ export default function DoctorPage({ user, onLogout }) {
     const [patientDetails, setPatientDetails] = useState(null);
     const [doctorNote, setDoctorNote] = useState('');
     const [quickPatientInfo, setQuickPatientInfo] = useState(null);
+    const [queriedPatientAppointments, setQueriedPatientAppointments] = useState([]);
+
+// src/pages/DoctorPage.jsx (fetchAppointments fonksiyonunun düzeltilmiş tam hali)
+
+const fetchAppointments = async () => {
+    if (!doctorUserId) return;
+
+    try {
+        setLoading(true);
+
+        const response = await getDoctorAppointments();
+        const now = new Date();
+
+        const processedAppointments = (response.data || []).map(app => {
+            // ISO formatında tarih-saat oluştur
+            // appointment_date: "2025-12-17", time: "16:30"
+            const appointmentDateTime = new Date(`${app.appointment_date}T${app.time}:00`);
+
+            // Randevu geçmiş mi kontrolü
+            const isPast = appointmentDateTime.getTime() < now.getTime() || app.status !== 'scheduled';
+
+            return {
+                ...app,
+                // Hastanın adı ve soyadı
+                patientName: `${app.patient_first_name || ''} ${app.patient_last_name || ''}`.trim() || 'Bilinmiyor',
+                isPast
+            };
+        });
+
+        setAppointments(processedAppointments);
+
+    } catch (error) {
+        console.error("Randevular çekilemedi:", error);
+        alert("Randevular yüklenirken bir hata oluştu.");
+        setAppointments([]);
+    } finally {
+        setLoading(false);
+    }
+};
 
 
     // --- useEffect: İzinleri LocalStorage'dan Çekme ve Kaydetme ---
 
     // 1. İzinleri yükle (Sayfa ilk yüklendiğinde çalışır)
-    useEffect(() => {
-        const storedLeave = localStorage.getItem(LEAVE_STORAGE_KEY);
-        if (storedLeave) {
-            try {
-                const parsedLeave = JSON.parse(storedLeave);
-                if (Array.isArray(parsedLeave)) {
-                    const todayShort = getShortDate(new Date());
-                    const futureLeaves = parsedLeave.filter(date => date >= todayShort);
-                    setLeaveDates(futureLeaves);
-                } else {
-                    setLeaveDates([]);
-                }
-            } catch (error) {
-                setLeaveDates([]);
-            }
-        }
-    }, []);
+  // src/pages/DoctorPage.jsx (İçine ekleyin)
 
-    // 2. İzinler değişince kaydet ve Backend'e gönder
-    useEffect(() => {
-        localStorage.setItem(LEAVE_STORAGE_KEY, JSON.stringify(leaveDates));
+  // --- YENİ useEffect: İZİNLİ GÜNLERİ SERVER'DAN ÇEKME ---
+  useEffect(() => {
+      const fetchLeaveDates = async () => {
+          setLeaveLoading(true);
+          try {
+              const response = await getDoctorLeaveDates();
+              // Varsayım: Backend'den gelen veri, 'dates' veya benzeri bir alanda [YYYY-MM-DD] dizisi içeriyor.
+              const fetchedDates = response.data.leaveDates || response.data || [];
 
-        // Backend entegrasyonu (Yapıldıysa çalışır)
-        // if (doctorUserId && typeof updateDoctorLeaveDates === 'function') {
-        //     updateDoctorLeaveDates(leaveDates).catch(err => {
-        //         console.error("İzinler Backend'e gönderilemedi:", err);
-        //     });
-        // }
-    }, [leaveDates, doctorUserId]);
+              if (Array.isArray(fetchedDates)) {
+                  const todayShort = getShortDate(new Date());
+                  // Sadece bugünden sonraki izinleri filtreleyerek yükle
+                  const futureLeaves = fetchedDates.filter(date => date >= todayShort);
+                  setLeaveDates(futureLeaves.sort());
+              } else {
+                   setLeaveDates([]);
+              }
+          } catch (error) {
+              console.error("İzinli günler çekilemedi:", error);
+              setLeaveDates([]);
+          } finally {
+              setLeaveLoading(false);
+          }
+      };
+
+      // Yalnızca doktor ID'si varsa çalıştır
+      if (doctorUserId) {
+          fetchLeaveDates();
+      }
+
+  }, [doctorUserId]); // doctorUserId değiştiğinde (veya ilk yüklemede) çalışır
+
+
 
 
     // --- PROFİL YÖNETİMİ FONKSİYONLARI (YENİ EKLENDİ) ---
@@ -192,61 +242,68 @@ export default function DoctorPage({ user, onLogout }) {
 
     // --- İZİN YÖNETİMİ FONKSİYONLARI ---
 
-    const handleAddLeave = (dateString) => {
+    // src/pages/DoctorPage.jsx
+
+    // --- PROFİL YÖNETİMİ FONKSİYONLARI (Sadece leave ile ilgili kısımlar) ---
+
+    // ... (Diğer profil fonksiyonları) ...
+
+    // --- İZİN EKLEME FONKSİYONU GÜNCELLENDİ ---
+    const handleAddLeave = async (dateString) => {
         if (!dateString) return;
-
         const today = getShortDate(new Date());
-        if (dateString < today) {
-            alert("Geçmiş bir tarih için izin ekleyemezsiniz.");
-            return;
-        }
+        if (dateString < today) { return alert("Geçmiş bir tarih için izin ekleyemezsiniz."); }
+        if (leaveDates.includes(dateString)) { return alert("Bu tarih zaten izinli günler listenizde."); }
 
-        if (leaveDates.includes(dateString)) {
-            alert("Bu tarih zaten izinli günler listenizde.");
-            return;
-        }
+        // Yeni izin listesi
+        const newLeaveDates = [...leaveDates, dateString].sort();
 
-        setLeaveDates(prev => [...prev, dateString].sort());
-        alert(`${formatDate(dateString)} için izin başarıyla eklendi.`);
-    };
-
-    const handleRemoveLeave = (dateString) => {
-        setLeaveDates(prev => prev.filter(date => date !== dateString));
-        alert(`${formatDate(dateString)} için izin başarıyla kaldırıldı.`);
-    };
-
-
-    // --- Randevuları Çekme ---
-    const fetchAppointments = async () => {
-        if (!doctorUserId) return;
         try {
-            setLoading(true);
-            const response = await getDoctorAppointments();
-            const appointmentsData = Array.isArray(response.data) ? response.data : [];
+            setLeaveLoading(true); // Yükleme durumunu başlat
+            // API çağrısı ile veritabanına kaydet
+            await updateDoctorLeaveDates(newLeaveDates);
 
-            if (appointmentsData.length > 0) {
-                const mappedAppointments = appointmentsData.map((a) => ({
-                    id: a.id,
-                    appointment_date: a.appointment_date,
-                    time: new Date(a.appointment_date).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
-                    patientId: a.patient_id,
-                    patientName: `${a.patient_first_name} ${a.patient_last_name}`,
-                    tc_no: a.tc_no,
-                    reason: a.reason,
-                    status: a.status,
-                    doctor_note: a.doctor_note || "",
-                }));
-                setAppointments(mappedAppointments);
-            } else {
-                setAppointments([]);
-            }
-        } catch (err) {
-            console.error("Randevuları çekme hatası:", err);
-            setAppointments([]);
-        } finally {
-            setLoading(false);
+            // Başarılı olursa state'i güncelle
+            setLeaveDates(newLeaveDates);
+            alert(`${formatDate(dateString)} için izin başarıyla eklendi ve kaydedildi.`);
+        } catch (error) {
+              console.error("İzin eklenirken hata (FULL):", {
+                  message: error.message,
+                  status: error.response?.status,
+                  data: error.response?.data,
+                  headers: error.response?.headers,
+              });
+
+              alert(
+                  error.response?.data?.message ||
+                  error.response?.data ||
+                  "İzin eklenirken bir hata oluştu."
+              );
+          } finally {
+            setLeaveLoading(false); // Yükleme durumunu bitir
         }
-    }
+    };
+
+    // --- İZİN KALDIRMA FONKSİYONU GÜNCELLENDİ ---
+    const handleRemoveLeave = async (dateString) => {
+        const newLeaveDates = leaveDates.filter(date => date !== dateString);
+
+        try {
+            setLeaveLoading(true); // Yükleme durumunu başlat
+            // API çağrısı ile veritabanına kaydet
+            await updateDoctorLeaveDates(newLeaveDates);
+
+            // Başarılı olursa state'i güncelle
+            setLeaveDates(newLeaveDates);
+            alert(`${formatDate(dateString)} için izin başarıyla kaldırıldı ve kaydedildi.`);
+        } catch (error) {
+            console.error("İzin kaldırılırken hata:", error);
+            alert("İzin kaldırılırken bir hata oluştu. Lütfen tekrar deneyin.");
+        } finally {
+            setLeaveLoading(false); // Yükleme durumunu bitir
+        }
+    };
+
 
     useEffect(() => {
         fetchAppointments();
@@ -310,28 +367,60 @@ export default function DoctorPage({ user, onLogout }) {
         setDoctorNote('');
     };
 
-    const handleSaveNote = async () => {
-        if (!selectedAppointment) return;
+   // src/pages/DoctorPage.jsx (handleSaveNote fonksiyonunun GÜNCELLENMİŞ HALİ)
 
-        try {
-            await updateAppointmentStatus(
-                selectedAppointment.id,
-                selectedAppointment.status,
-                doctorNote
-            );
+       const handleSaveNote = async () => {
+           // ID, Status ve Note kontrolü zorunlu alanlar
+           if (!selectedAppointment || !selectedAppointment.id || !selectedAppointment.status) {
+               alert("Hata: Randevu detayları (ID veya Durum) eksik. Lütfen sayfayı yenileyin.");
+               return;
+           }
 
-            setAppointments(prev => prev.map(app =>
-                app.id === selectedAppointment.id ? { ...app, doctor_note: doctorNote } : app
-            ));
+           // 1. KATI KONTROL: Eğer not alanı boşsa, Backend'e gitmeyi deneme.
+           if (!doctorNote || doctorNote.trim() === "") {
+               alert("Kaydetmek için doktor notu alanı boş bırakılamaz.");
+               return;
+           }
 
-            setSelectedAppointment(prev => ({ ...prev, doctor_note: doctorNote }));
+           // 2. TOKEN VE API HAZIRLIĞI
+           initializeAuthToken();
 
-            alert("Doktor notu başarıyla kaydedildi.");
+           try {
+               // Backend'e hem mevcut status'ü hem de dolu olan notu gönderiyoruz.
+               await updateAppointmentStatus(
+                   selectedAppointment.id,
+                   selectedAppointment.status, // Mevcut geçerli durumu geri gönder
+                   doctorNote.trim()           // Notu trim'lenmiş ve dolu olarak gönder
+               );
 
-        } catch (error) {
-            alert("Not kaydedilirken hata oluştu.");
-        }
-    };
+               // Başarılı güncelleme sonrası Frontend state'lerini güncelle
+               setAppointments(prev => prev.map(app =>
+                   app.id === selectedAppointment.id ? { ...app, doctor_note: doctorNote.trim() } : app
+               ));
+
+               setSelectedAppointment(prev => ({ ...prev, doctor_note: doctorNote.trim() }));
+
+               alert("Doktor notu başarıyla kaydedildi.");
+
+           } catch (error) {
+               console.error("Not kaydetme hatası:", error.response || error.message);
+
+               let errorMessage = "Not kaydedilirken beklenmedik bir hata oluştu.";
+
+               if (error.response) {
+                   const backendMessage = error.response.data?.message || JSON.stringify(error.response.data);
+                   if (error.response.status === 400) {
+                       errorMessage = `Kaydetme başarısız (400 Bad Request). Backend Mesajı: ${backendMessage || 'Gönderilen veri formatı hatalı.'}`;
+                   } else if (error.response.status === 401) {
+                       errorMessage = "Oturum süreniz doldu. Lütfen tekrar giriş yapın.";
+                   } else if (error.response.data && error.response.data.message) {
+                       errorMessage = "Kaydetme başarısız: " + error.response.data.message;
+                   }
+               }
+
+               alert(errorMessage);
+           }
+       };
 
     const handleUpdateAppointment = async (appointmentId, newStatus, currentNote = '') => {
 
@@ -358,6 +447,7 @@ export default function DoctorPage({ user, onLogout }) {
         e.preventDefault();
         setPatientError("");
         setPatientInfo(null);
+        setQueriedPatientAppointments([]);
 
         const trimmed = searchTc.trim();
         if (!trimmed) {
@@ -559,54 +649,55 @@ export default function DoctorPage({ user, onLogout }) {
 
     // --- YENİ BİLEŞEN: İZİN YÖNETİMİ ---
     function renderLeaveManagement() {
-        const sortedLeaveDates = [...leaveDates].sort();
+            const sortedLeaveDates = [...leaveDates].sort();
 
-        return (
-            <>
-                <h1 style={{ fontSize: "24px", marginBottom: "16px" }}>
-                    İzin Yönetimi
-                </h1>
-                <div className="card">
-                    <h3>İzin Ekle</h3>
-                    {/* HİZALAMA DÜZELTİLDİ */}
-                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '30px' }}>
+            return (
+                <>
+                    <h1 style={{ fontSize: "24px", marginBottom: "16px" }}>
+                        İzin Yönetimi
+                    </h1>
+                    <div className="card">
+                        <h3>İzin Ekle</h3>
 
-                        {/* Tarih Seçici */}
-                        <div className="form-group" style={{ flex: 1, maxWidth: '200px' }}>
-                            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600 }}>İzin Tarihi Seçin</label>
-                            <input
-                                type="date"
-                                className="form-input"
-                                value={leaveDateInput}
-                                onChange={(e) => setLeaveDateInput(e.target.value)}
-                                min={getShortDate(new Date())} // Bugün ve sonrası seçilebilir
-                            />
+                        {/* HİZALAMA DÜZELTİLDİ: align-items: flex-end ve flex:1 kaldırıldı */}
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '30px' }}>
+
+                            {/* Tarih Seçici - Gerekli max-width korundu */}
+                            <div className="form-group" style={{ maxWidth: '300px' }}>
+                                <label style={{ display: 'block', marginBottom: '7px', fontWeight: 600 }}>İzin Tarihi Seçin</label>
+                                <input
+                                    type="date"
+                                    className="form-input"
+                                    value={leaveDateInput}
+                                    onChange={(e) => setLeaveDateInput(e.target.value)}
+                                    min={getShortDate(new Date())} // Bugün ve sonrası seçilebilir
+                                />
+                            </div>
+
+                            {/* Ekle Butonu - height: 38px tam hizalama için korunuyor */}
+                            <button
+                                onClick={() => {
+                                    if (leaveDateInput) {
+                                        handleAddLeave(leaveDateInput);
+                                        setLeaveDateInput('');
+                                    }
+                                }}
+                                style={{
+                                    height: '35px',
+                                    whiteSpace: 'nowrap',
+                                    backgroundColor: '#ffc107', // Sarı renk
+                                    color: '#333',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    padding: '8px 15px',
+                                    fontWeight: 600
+                                }}
+                                disabled={!leaveDateInput || leaveDates.includes(leaveDateInput) || leaveDateInput < getShortDate(new Date())}
+                            >
+                                İzin Ekle
+                            </button>
                         </div>
-
-                        {/* Ekle Butonu - SARI YAPILDI */}
-                        <button
-                            onClick={() => {
-                                if (leaveDateInput) {
-                                    handleAddLeave(leaveDateInput);
-                                    setLeaveDateInput('');
-                                }
-                            }}
-                            style={{
-                                height: '38px',
-                                whiteSpace: 'nowrap',
-                                backgroundColor: '#ffc107', // Sarı renk
-                                color: '#333',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                padding: '8px 15px',
-                                fontWeight: 600
-                            }}
-                            disabled={!leaveDateInput || leaveDates.includes(leaveDateInput) || leaveDateInput < getShortDate(new Date())}
-                        >
-                            İzin Ekle
-                        </button>
-                    </div>
 
                     <h3>Kayıtlı İzinli Günler ({leaveDates.length})</h3>
                     {leaveDates.length === 0 ? (
@@ -654,14 +745,15 @@ useEffect(() => {
 
             setProfileData(prev => ({
                 ...prev,
-                firstName: data.first_name || '',
-                lastName: data.last_name || '',
+                firstName: data.firstName || '',
+                lastName: data.lastName || '',
                 email: data.email || '',
                 specialization: data.specialization || 'Belirtilmedi',
                 title: data.title || 'Dr.',
                 newPassword: '',
                 confirmNewPassword: ''
             }));
+
 
         } catch (error) {
             console.error("Doktor profili alınamadı:", error);
@@ -708,7 +800,12 @@ useEffect(() => {
                         className="action-button action-primary"
                         // Düzenleme moduna geçiş yapar ve mesajları temizler
                         onClick={() => { setIsEditingProfile(true); setProfileMessage({ type: '', text: '' }); }}
-                        style={{ marginTop: '25px', padding: '10px 20px' }}
+                        style={{ marginTop: '25px',
+                            padding: '10px 20px',
+                             backgroundColor: '#ffc107',
+                                 color: '#333',
+                                 border: 'none',
+                             fontWeight: 'bold'}}
                     >
                         Bilgileri Güncelle
                     </button>
@@ -789,7 +886,8 @@ useEffect(() => {
                                 type="submit"
                                 className="action-button action-success"
                                 disabled={profileLoading}
-                                style={{ padding: '10px 20px' }}
+                                style={{ padding: '10px 20px',
+                                    backgroundColor: '#ffc107',}}
                             >
                                 {profileLoading ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
                             </button>
@@ -946,8 +1044,7 @@ useEffect(() => {
                         </tbody>
                     </table>
 
-                    <p style={{fontSize: '13px', color: '#999', marginTop: '20px'}}>Not: Çalışma saatleriniz sabittir. Randevu oluşturulurken çakışma kontrolünü Backend'in yapması gerekmektedir.</p>
-                </div>
+                        </div>
             </>
         );
     }
@@ -960,269 +1057,274 @@ useEffect(() => {
 
     // --- ANA RENDER ---
     return (
-        <div className="app-layout">
-            {/* Modal bileşenleri */}
-            {renderAppointmentDetailModal()}
-            {renderQuickPatientInfoModal()}
+      <div className="app-layout">
+        {/* Modal bileşenleri */}
+        {renderAppointmentDetailModal && renderAppointmentDetailModal()}
+        {renderQuickPatientInfoModal && renderQuickPatientInfoModal()}
 
-            {/* SOL: SIDEBAR */}
-            <aside className="app-sidebar">
-                <div>
-                    <h2 className="app-sidebar-title">Cankaya Hospital</h2>
-                    <p className="app-sidebar-subtitle">@{user.username} · doctor</p>
+        {/* SOL: SIDEBAR */}
+        <aside className={`app-sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
+          <div>
+            <h2 className="app-sidebar-title">Cankaya Hospital</h2>
 
-                    <div className="sidebar-buttons">
-                        {/* DOKTOR PANELİ */}
-                        <button
-                            className={sectionButtonClass("panel")}
-                            onClick={() => setActiveSection("panel")}
-                        >
-                            Randevular
-                        </button>
+            {/* SIDEBAR DARALT BUTONU */}
+            <button
+              className="sidebar-toggle"
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            >
+              {isSidebarCollapsed ? "➡️" : "⬅️"}
+            </button>
 
-                        {/* ÇALIŞMA TAKVİMİ */}
-                        <button
-                            className={sectionButtonClass("calendar")}
-                            onClick={() => setActiveSection("calendar")}
-                            style={{ marginTop: "8px" }}
-                        >
-                            Çalışma Takvimi
-                        </button>
+            {/* DOKTOR PROFİL ALANI */}
+            <div className="doctor-sidebar-profile">
+              <div className="doctor-avatar">
+                {profileData ? (
+                  profileData.firstName?.charAt(0) + profileData.lastName?.charAt(0)
+                ) : null}
+              </div>
 
-                        {/* YENİ: İZİN YÖNETİMİ */}
-                        <button
-                            className={sectionButtonClass("leave")}
-                            onClick={() => setActiveSection("leave")}
-                            style={{ marginTop: "8px" }}
-                        >
-                            İzin Yönetimi
-                        </button>
+              {!isSidebarCollapsed && profileData && (
+                <div className="doctor-info">
+                  <div className="doctor-name">
+                    {profileData.title} {profileData.firstName} {profileData.lastName}
+                  </div>
+                  <div className="doctor-branch">
+                    {profileData.specialization}
+                  </div>
+                </div>
+              )}
+            </div>
 
-                        {/* HASTA SORGULA */}
-                        <button
-                            className={sectionButtonClass("search")}
-                            onClick={() => setActiveSection("search")}
-                            style={{ marginTop: "8px" }}
-                        >
-                            Hasta Sorgula
-                        </button>
+            {/* MENÜ BUTONLARI */}
+            <div className="sidebar-buttons">
+              <button
+                className={sectionButtonClass("panel")}
+                onClick={() => setActiveSection("panel")}
+              >
+                Randevular
+              </button>
 
-                        {/* YENİ: PROFİL AYARLARI - GÖRÜNTÜLEME MODUNDA BAŞLAT */}
-                        <button
-                            className={sectionButtonClass("profile")}
-                            onClick={() => { setActiveSection("profile"); setIsEditingProfile(false); }}
-                            style={{ marginTop: "8px" }}
-                        >
-                            Profil/Hesap Ayarları
-                        </button>
+              <button
+                className={sectionButtonClass("calendar")}
+                onClick={() => setActiveSection("calendar")}
+                style={{ marginTop: "8px" }}
+              >
+                Çalışma Takvimi
+              </button>
 
-                        {activeSection === "search" && (
-                            <form className="search-form" onSubmit={handleSearchTc}>
-                                <input
-                                    type="text"
-                                    placeholder="TC Kimlik No"
-                                    value={searchTc}
-                                    onChange={(e) => setSearchTc(e.target.value)}
-                                    className="search-input"
-                                />
-                                <button type="submit" className="search-button">
-                                    Ara
-                                </button>
-                            </form>
-                        )}
-                    </div>
+              <button
+                className={sectionButtonClass("leave")}
+                onClick={() => setActiveSection("leave")}
+                style={{ marginTop: "8px" }}
+              >
+                İzin Yönetimi
+              </button>
+
+              <button
+                className={sectionButtonClass("search")}
+                onClick={() => setActiveSection("search")}
+                style={{ marginTop: "8px" }}
+              >
+                Hasta Sorgula
+              </button>
+
+{activeSection === "search" && (
+                <form className="search-form" onSubmit={handleSearchTc}>
+                  <input
+                    type="text"
+                    placeholder="TC Kimlik No"
+                    value={searchTc}
+                    onChange={(e) => setSearchTc(e.target.value)}
+                    className="search-input"
+                  />
+                  <button type="submit" className="search-button">Ara</button>
+                </form>
+              )}
+
+              <button
+                className={sectionButtonClass("profile")}
+                onClick={() => { setActiveSection("profile"); setIsEditingProfile(false); }}
+                style={{ marginTop: "8px" }}
+              >
+                Profil/Hesap Ayarları
+              </button>
+
+
+
+              <button onClick={onLogout} className="logout-button">
+                Çıkış
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        {/* SAĞ: BODY */}
+        <main className="app-main">
+          {/* --- HASTA SORGULA --- */}
+          {activeSection === "search" && (
+            <div className="card">
+              <h2>Hasta Bilgileri</h2>
+
+              {patientError && (
+                <p style={{ color: "red", marginTop: "8px" }}>{patientError}</p>
+              )}
+
+              {!patientInfo && !patientError && (
+                <p style={{ fontSize: "14px", color: "#555", marginTop: "8px" }}>
+                  Lütfen sol taraftan TC Kimlik No girerek bir hasta arayın.
+                </p>
+              )}
+
+              {patientInfo && (
+                <div style={{ marginTop: "12px" }}>
+                  <table style={{ borderCollapse: "collapse", fontSize: "14px", color: "#555", width: '100%' }}>
+                    <tbody>
+                      <tr>
+                        <td style={{ padding: "4px 12px 4px 0", fontWeight: 600, width: '150px' }}>Ad Soyad</td>
+                        <td style={{ padding: "4px 0" }}>{patientInfo.first_name} {patientInfo.last_name}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: "4px 12px 4px 0", fontWeight: 600 }}>TC Kimlik No</td>
+                        <td style={{ padding: "4px 0" }}>{patientInfo.tc_no}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: "4px 12px 4px 0", fontWeight: 600 }}>Doğum Tarihi</td>
+                        <td style={{ padding: "4px 0" }}>{formatDate(patientInfo.date_of_birth) || 'Bilinmiyor'}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* --- DOKTOR PANELİ: RANDEVULAR --- */}
+          {activeSection === "panel" && (
+            <>
+              <h1 style={{ fontSize: "24px", marginBottom: "16px" }}>
+                Randevular
+              </h1>
+
+              <div className="card">
+                {/* Filtreleme Arayüzü */}
+                <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600 }}>Tarih Aralığı</label>
+                    <select
+                      value={dateFilter}
+                      onChange={(e) => setDateFilter(e.target.value)}
+                      className="form-input"
+                      style={{ width: '100%' }}
+                    >
+                      <option value="today">Bugün</option>
+                      <option value="tomorrow">Yarın</option>
+                      <option value="next_7_days">Gelecek 7 Gün</option>
+                      <option value="all">Tüm Randevular</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600 }}>Durum</label>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="form-input"
+                      style={{ width: '100%' }}
+                    >
+                      <option value="all">Tümü</option>
+                      <option value="scheduled">Bekliyor</option>
+                      <option value="completed">Tamamlandı</option>
+                      <option value="canceled">İptal Edildi</option>
+                    </select>
+                  </div>
                 </div>
 
-                <button onClick={onLogout} className="logout-button">
-                    Çıkış
-                </button>
-            </aside>
+                {loading ? (
+                  <p>Yükleniyor...</p>
+                ) : filteredAppointments.length === 0 ? (
+                  <p>Seçilen filtreye uygun randevu bulunmamaktadır.</p>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ textAlign: "left", fontSize: "14px", color: "#6b7280" }}>
+                        <th>Tarih</th>
+                        <th>Saat</th>
+                        <th>Hasta Adı</th>
+                        <th>Neden</th>
+                        <th>Durum</th>
+                        <th>İşlem</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAppointments.map((a) => (
+                        <tr key={a.id}>
+                          <td>{formatDate(a.appointment_date)}</td>
+                          <td>{a.time}</td>
+                          <td>
+                            <a
+                              href="#"
+                              onClick={(e) => { e.preventDefault(); handleQuickPatientInfoClick(a.tc_no, a.patientName); }}
+                              style={{ color: '#007bff', textDecoration: 'underline', cursor: 'pointer' }}
+                              title="Hasta detaylarını hızla gör"
+                            >
+                              {a.patientName}
+                            </a>
+                          </td>
+                          <td>{a.reason}</td>
+                          <td>
+                            <span className={getStatusClass(a.status)}>
+                              {getStatusText(a.status)}
+                            </span>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="action-button details-button"
+                              onClick={() => handleDetailsClick(a)}
+                              style={{ marginRight: '5px' }}
+                            >
+                              Detay
+                            </button>
 
-            {/* SAĞ: BODY */}
-            <main className="app-main">
-                {/* --- HASTA SORGULA --- */}
-                {activeSection === "search" && (
-                    <div className="card">
-                        <h2>Hasta Bilgileri</h2>
-
-                        {patientError && (
-                            <p style={{ color: "red", marginTop: "8px" }}>{patientError}</p>
-                        )}
-
-                        {!patientInfo && !patientError && (
-                            <p style={{ fontSize: "14px", color: "#555", marginTop: "8px" }}>
-                                Lütfen sol taraftan TC Kimlik No girerek bir hasta arayın.
-                            </p>
-                        )}
-
-                        {patientInfo && (
-                            <div style={{ marginTop: "12px" }}>
-                                <table style={{ borderCollapse: "collapse", fontSize: "14px", color: "#555", width: '100%' }}>
-                                    <tbody>
-                                        <tr>
-                                            <td style={{ padding: "4px 12px 4px 0", fontWeight: 600, width: '150px' }}>Ad Soyad</td>
-                                            <td style={{ padding: "4px 0" }}>{patientInfo.first_name} {patientInfo.last_name}</td>
-                                        </tr>
-                                        <tr>
-                                            <td style={{ padding: "4px 12px 4px 0", fontWeight: 600 }}>TC Kimlik No</td>
-                                            <td style={{ padding: "4px 0" }}>{patientInfo.tc_no}</td>
-                                        </tr>
-                                        <tr>
-                                            <td style={{ padding: "4px 12px 4px 0", fontWeight: 600 }}>Doğum Tarihi</td>
-                                            <td style={{ padding: "4px 0" }}>{formatDate(patientInfo.date_of_birth) || 'Bilinmiyor'}</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {/* --- DOKTOR PANELİ: RANDEVULAR --- */}
-                {activeSection === "panel" && (
-                    <>
-                        <h1 style={{ fontSize: "24px", marginBottom: "16px" }}>
-                            Randevular
-                        </h1>
-
-                        <div className="card">
-
-                             {/* FİLTRELEME ARAYÜZÜ */}
-                            <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
-
-                                {/* Tarih Filtresi */}
-                                <div className="form-group" style={{ flex: 1 }}>
-                                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600 }}>Tarih Aralığı</label>
-                                    <select
-                                        value={dateFilter}
-                                        onChange={(e) => setDateFilter(e.target.value)}
-                                        className="form-input"
-                                        style={{ width: '100%' }}
-                                    >
-                                        <option value="today">Bugün</option>
-                                        <option value="tomorrow">Yarın</option>
-                                        <option value="next_7_days">Gelecek 7 Gün</option>
-                                        <option value="all">Tüm Randevular</option>
-                                    </select>
-                                </div>
-
-                                {/* Durum Filtresi */}
-                                <div className="form-group" style={{ flex: 1 }}>
-                                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 600 }}>Durum</label>
-                                    <select
-                                        value={statusFilter}
-                                        onChange={(e) => setStatusFilter(e.target.value)}
-                                        className="form-input"
-                                        style={{ width: '100%' }}
-                                    >
-                                        <option value="all">Tümü</option>
-                                        <option value="scheduled">Bekliyor</option>
-                                        <option value="completed">Tamamlandı</option>
-                                        <option value="canceled">İptal Edildi</option>
-                                    </select>
-                                </div>
-                            </div>
-                            {/* FİLTRELEME ARAYÜZÜ SONU */}
-
-
-                            {loading ? (
-                                <p>Yükleniyor...</p>
-                            ) : filteredAppointments.length === 0 ? (
-                                <p>Seçilen filtreye uygun randevu bulunmamaktadır.</p>
-                            ) : (
-                                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                                    <thead>
-                                        <tr style={{ textAlign: "left", fontSize: "14px", color: "#6b7280" }}>
-                                            <th>Tarih</th>
-                                            <th>Saat</th>
-                                            <th>Hasta Adı</th>
-                                            <th>Neden</th>
-                                            <th>Durum</th>
-                                            <th>İşlem</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredAppointments.map((a) => (
-                                            <tr key={a.id}>
-                                                <td>{formatDate(a.appointment_date)}</td>
-                                                <td>{a.time}</td>
-                                                <td>
-                                                    <a
-                                                        href="#"
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            handleQuickPatientInfoClick(a.tc_no, a.patientName);
-                                                        }}
-                                                        style={{ color: '#007bff', textDecoration: 'underline', cursor: 'pointer' }}
-                                                        title="Hasta detaylarını hızla gör"
-                                                    >
-                                                        {a.patientName}
-                                                    </a>
-                                                </td>
-                                                <td>{a.reason}</td>
-                                                <td>
-                                                    <span className={getStatusClass(a.status)}>
-                                                        {getStatusText(a.status)}
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <button
-                                                        type="button"
-                                                        className="action-button details-button"
-                                                        onClick={() => handleDetailsClick(a)}
-                                                        style={{ marginRight: '5px' }}
-                                                    >
-                                                        Detay
-                                                    </button>
-
-                                                    {/* HIZLI İŞLEM BUTONLARI */}
-                                                    {a.status === 'scheduled' && (
-                                                        <>
-                                                            <button
-                                                                type="button"
-                                                                className="action-button action-success"
-                                                                onClick={() => handleUpdateAppointment(a.id, 'completed', a.doctor_note)}
-                                                                title="Tamamlandı olarak işaretle"
-                                                                style={{ marginRight: '5px' }}
-                                                            >
-                                                                 Tamamla
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="action-button action-danger"
-                                                                onClick={() => handleUpdateAppointment(a.id, 'canceled', a.doctor_note)}
-                                                                title="İptal edildi olarak işaretle"
-                                                            >
-                                                                 İptal Et
-                                                            </button>
-                                                        </>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                            {a.status === 'scheduled' && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="action-button action-success"
+                                  onClick={() => handleUpdateAppointment(a.id, 'completed', a.doctor_note)}
+                                  style={{ marginRight: '5px' }}
+                                >
+                                  Tamamla
+                                </button>
+                                <button
+                                  type="button"
+                                  className="action-button action-danger"
+                                  onClick={() => handleUpdateAppointment(a.id, 'canceled', a.doctor_note)}
+                                >
+                                  İptal Et
+                                </button>
+                              </>
                             )}
-                        </div>
-                    </>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 )}
+              </div>
+            </>
+          )}
 
-                {/* --- DOKTOR PANELİ: ÇALIŞMA TAKVİMİ --- */}
-                {activeSection === "calendar" && (
-                    renderWorkCalendar()
-                )}
+          {/* --- DOKTOR PANELİ: ÇALIŞMA TAKVİMİ --- */}
+          {activeSection === "calendar" && renderWorkCalendar && renderWorkCalendar()}
 
-                 {/* --- YENİ: İZİN YÖNETİMİ --- */}
-                {activeSection === "leave" && (
-                    renderLeaveManagement()
-                )}
+          {/* --- İZİN YÖNETİMİ --- */}
+          {activeSection === "leave" && renderLeaveManagement && renderLeaveManagement()}
 
-                {/* --- YENİ: PROFİL AYARLARI --- */}
-                {activeSection === "profile" && (
-                    renderProfileManagement()
-                )}
+          {/* --- PROFİL AYARLARI --- */}
+          {activeSection === "profile" && renderProfileManagement && renderProfileManagement()}
 
-            </main>
-        </div>
+        </main>
+      </div>
     );
 }

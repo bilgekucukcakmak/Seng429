@@ -7,13 +7,16 @@ import {
     addSpecialization,
     getAllUsers,
     deleteUser,
-    // YENİ CONTROLLER IMPORT EDİLDİ
-    updateDoctor
+    updateDoctor,
+    getAppointmentStats,
+    getAppointmentsBySpecialization,
+    getDoctorsBySpecialization,
+
+
 } from '../controllers/adminController.js';
 import { ensureAdmin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
-
 // Poliklinikler Rotası
 router.get('/specializations', ensureAdmin, getSpecializations);
 router.post('/specializations', ensureAdmin, addSpecialization);
@@ -32,6 +35,27 @@ router.delete('/users/:id', ensureAdmin, deleteUser);
 // DOKTOR GÜNCELLEME ROTASI (YENİ EKLENDİ)
 // Front-end'den gelen PUT /api/admin/doctor/:userId isteğini karşılar
 router.put('/doctor/:id', ensureAdmin, updateDoctor);
+
+// Backend: routes/admin.js veya benzeri bir dosya
+// RANDEVU İSTATİSTİKLERİ (ÇOK ÖNEMLİ)
+router.get(
+    '/reports/appointment-stats',
+    ensureAdmin,
+    getAppointmentStats
+);
+router.get(
+    '/reports/appointments-by-specialization',
+    ensureAdmin,
+    getAppointmentsBySpecialization
+);
+
+router.get(
+    '/reports/doctors-by-specialization/:specialization',
+    ensureAdmin,
+    getDoctorsBySpecialization
+);
+
+
 
 
 export default router;

@@ -764,3 +764,177 @@
     background-color: #dc3545; /* Kırmızı */
     color: white;
 }
+
+/* === DOCTOR SIDEBAR PROFILE =============================================== */
+
+.doctor-sidebar-profile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0 24px 0;
+}
+
+/* AVATAR */
+.doctor-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background-color: #ffc107; /* sarı */
+    color: #2b2b2b; /* okunur koyu */
+    font-weight: 700;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-transform: uppercase;
+    transition: transform 0.25s ease;
+}
+
+/* İSİM + BRANŞ BLOĞU */
+.doctor-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    transition: background-color 0.25s ease, transform 0.25s ease;
+}
+
+.doctor-info:hover {
+    background-color: rgba(255, 193, 7, 0.18); /* soft sarı */
+    transform: translateX(3px);
+}
+
+.doctor-info:hover + .doctor-avatar,
+.doctor-sidebar-profile:hover .doctor-avatar {
+    transform: scale(1.12);
+}
+
+/* YAZILAR */
+.doctor-name {
+    font-weight: 700;
+    font-size: 14px;
+    color: #f8f9fa;
+    line-height: 1.2;
+}
+
+.doctor-branch {
+    font-size: 12px;
+    color: #e0e0e0;
+}
+
+/* === SIDEBAR COLLAPSE DAVRANIŞI ============================================ */
+
+.app-sidebar {
+    width: 240px;
+    transition: width 0.3s ease;
+}
+
+.app-sidebar.collapsed {
+    width: 80px;
+}
+
+/* Sidebar daralınca SADECE avatar kalsın */
+.app-sidebar.collapsed .doctor-info {
+    display: none;
+}
+
+.app-sidebar.collapsed .doctor-sidebar-profile {
+    justify-content: center;
+}
+
+.app-sidebar.collapsed .doctor-avatar {
+    margin: 0 auto;
+}
+
+/* Toggle butonu (istersen kullanırsın) */
+.sidebar-toggle {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    margin-bottom: 12px;
+}
+
+/* Randevu Slot Butonları (Örnek Stil) */
+.slot-button {
+    padding: 8px 12px;
+    margin: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background-color 0.2s, color 0.2s;
+    text-align: center;
+}
+
+/* Müsait Slot (Yeşil) */
+.slot-available {
+    background-color: #d4edda; /* Açık Yeşil */
+    color: #155724;
+    border-color: #c3e6cb;
+}
+
+/* Dolu Slot (Kırmızı) */
+.slot-unavailable,
+.slot-booked,
+.slot-leave,
+.slot-past {
+    background-color: #f8d7da; /* Açık Kırmızı */
+    color: #721c24;
+    border-color: #f5c6cb;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* Seçilmiş Slot (Mavi/Farklı renk) */
+.slot-button:not(.slot-unavailable):hover,
+.slot-selected {
+    background-color: #007bff; /* Mavi */
+    color: white;
+    border-color: #007bff;
+}
+/* src/styles/layout.css veya LoginPage.css dosyasına ekleyin */
+
+/* Arka planı tutacak genel kapsayıcı stili */
+.login-background-container {
+    /* Ekranı tamamen kapla */
+    min-height: 100vh;
+    width: 100vw;
+    display: flex;
+    justify-content: center; /* Formu yatayda ortala */
+    align-items: center; /* Formu dikeyde ortala */
+
+    /* Görüntü Ayarları */
+    background-image: url('../assets/hospital-bg.jpg'); /* DOSYA YOLUNU KENDİ PROJENİZE GÖRE DÜZELTİN! */
+    background-size: cover; /* Resmi kapsayıcıya sığacak şekilde büyüt */
+    background-position: center; /* Resmi ortala */
+
+    /* Silik (Blur) ve Karartma Efekti (KRİTİK KISIM) */
+    position: relative; /* ::before pseudo elementi için zorunlu */
+}
+
+/* Arka planı tutacak genel kapsayıcı stili */
+.login-background-container {
+    /* Ekranı tamamen kapla */
+    min-height: 100vh;
+    width: 100vw;
+    display: flex;
+    justify-content: center; /* Formu yatayda ortala */
+    align-items: center; /* Formu dikeyde ortala */
+
+    /* Görüntü Ayarları */
+    /* KRİTİK DÜZELTME: Doğru dosya yolunu (src/assets) belirtiyoruz. */
+    background-image: url('../assets/hospital-bg.jpg');
+    background-size: cover; /* Resmi kapsayıcıya sığacak şekilde büyüt */
+    background-position: center; /* Resmi ortala */
+
+    /* Silik (Blur) ve Karartma Efekti için konumu ayarla */
+    position: relative;
+}
+
+.recharts-responsive-container {
+    min-width: 0;
+    min-height: 200px; /* Veya istediğiniz bir değer */
+}
+

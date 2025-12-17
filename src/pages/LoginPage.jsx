@@ -1,8 +1,8 @@
-// src/pages/LoginPage.jsx - Hesap Oluşturma Linki ve Kontrolleri
+// src/pages/LoginPage.jsx (NİHAİ VE TAM HALİ - Arka Plan Görseli ve Kontroller)
 
 import { useState } from "react";
 import "../styles/login.css";
-import { loginRequest, setAuthToken } from "../services/api";
+import { loginRequest } from "../services/api";
 import { useNavigate } from "react-router-dom";
 
 export default function LoginPage({ onLogin }) {
@@ -40,7 +40,6 @@ export default function LoginPage({ onLogin }) {
         try {
             const user = await loginRequest(username, password, role);
 
-            // Kullanıcı bilgilerini localStorage'a kaydetme
             localStorage.setItem('userRole', user.role);
             localStorage.setItem('userId', user.id);
             localStorage.setItem('username', username);
@@ -77,9 +76,12 @@ export default function LoginPage({ onLogin }) {
     };
 
     return (
-        <div className="login-page">
-            <div className="login-card">
-                <h1 className="login-title">Giriş Yap</h1>
+        // YENİ ARKA PLAN KAPSAYICISI (Fotoğraf ve Blur Efekti)
+        <div className="login-background-container">
+
+            {/* Form içeriği kartı */}
+            <div className="login-content">
+                <h1 className="login-title">Çankaya Hospital</h1>
 
                 {/* ================ GİRİŞ YAP FORMU ================== */}
                 <form onSubmit={handleSubmit}>
@@ -90,6 +92,8 @@ export default function LoginPage({ onLogin }) {
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
                             required
+                            className="form-input"
+                            placeholder="E-posta adresinizi girin"
                         />
                     </div>
 
@@ -100,6 +104,8 @@ export default function LoginPage({ onLogin }) {
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             required
+                            className="form-input"
+                            placeholder="Şifrenizi girin"
                         />
                     </div>
 
@@ -108,6 +114,7 @@ export default function LoginPage({ onLogin }) {
                         <select
                             value={role}
                             onChange={(e) => setRole(e.target.value)}
+                            className="form-input"
                         >
                             <option value="doctor">Doktor</option>
                             <option value="patient">Hasta</option>
@@ -116,7 +123,7 @@ export default function LoginPage({ onLogin }) {
                     </div>
 
                     {/* HATA MESAJI */}
-                    {error && <p className="error-text" style={{ color: 'red', marginBottom: '15px' }}>{error}</p>}
+                    {error && <p className="error-text" style={{ color: 'red', marginBottom: '15px', fontWeight: 'bold' }}>{error}</p>}
 
                     {/* =============== KONTROL GRUBU =============== */}
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', marginBottom: '20px' }}>
@@ -172,7 +179,13 @@ export default function LoginPage({ onLogin }) {
                         disabled={!kvkkConfirmed || !recaptchaPassed}
                         style={{
                             opacity: (!kvkkConfirmed || !recaptchaPassed) ? 0.6 : 1,
-                            width: '100%'
+                            width: '100%',
+                            backgroundColor: '#f2c94c',
+                            color: 'black',
+                            padding: '10px 15px',
+                            border: 'none',
+                            borderRadius: '5px',
+                            cursor: 'pointer'
                         }}
                     >
                         Giriş Yap

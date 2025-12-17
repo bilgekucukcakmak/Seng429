@@ -126,6 +126,7 @@ export const getAllUsers = async (req, res) => {
     }
 };
 
+
 // 5. Kullanıcı Silme
 export const deleteUser = async (req, res) => {
     const userId = req.params.id;
@@ -144,6 +145,87 @@ export const deleteUser = async (req, res) => {
     }
 };
 
+
+export const getAppointmentStats = async (req, res) => {
+    try {
+        const { period } = req.query;
+
+        let dateFilter = '';
+        if (period === 'day') {
+            dateFilter = 'AND DATE(a.appointment_date) = CURDATE()';
+        } else if (period === 'week') {
+            dateFilter = 'AND a.appointment_date >= DATE_SUB(NOW(), INTERVAL 7 DAY)';
+        } else if (period === 'month') {
+            dateFilter = 'AND a.appointment_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
+        }
+
+        const query = `
+            SELECT
+                d.specialization AS department,
+                COUNT(a.id) AS count
+            FROM appointments a
+            JOIN doctors d ON a.doctor_id = d.id
+            WHERE a.status != 'canceled'
+            ${dateFilter}
+            GROUP BY d.specialization
+            HAVING COUNT(a.id) > 0
+        `;
+
+        const [rows] = await pool.execute(query);
+        res.status(200).json(rows);
+
+    } catch (error) {
+        console.error('Appointment stats error:', error);
+        res.status(500).send('Sunucu hatası');
+    }
+};
+
+export const getAppointmentsBySpecialization = async (req, res) => {
+    try {
+        const query = `
+            SELECT
+                d.specialization,
+                COUNT(a.id) AS count
+            FROM appointments a
+            JOIN doctors d ON a.doctor_id = d.id
+            WHERE a.status = 'scheduled'
+            GROUP BY d.specialization
+            HAVING COUNT(a.id) > 0
+            ORDER BY count DESC
+        `;
+
+        const [rows] = await pool.execute(query);
+        res.json(rows);
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).send('Sunucu hatası');
+    }
+};
+export const getDoctorsBySpecialization = async (req, res) => {
+    const { specialization } = req.params;
+
+    try {
+        const query = `
+            SELECT
+                CONCAT(d.title, ' ', d.first_name, ' ', d.last_name) AS doctor,
+                COUNT(a.id) AS count
+            FROM appointments a
+            JOIN doctors d ON a.doctor_id = d.id
+            WHERE d.specialization = ?
+              AND a.status = 'scheduled'
+            GROUP BY d.id
+            ORDER BY count DESC
+        `;
+
+        const [rows] = await pool.execute(query, [specialization]);
+        res.json(rows);
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).send('Sunucu hatası');
+    }
+};
 
 // 6. DOKTOR GÜNCELLEME (YENİ EKLEME)
 export const updateDoctor = async (req, res) => {
