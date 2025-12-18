@@ -1,140 +1,90 @@
-Cankaya Hospital – Frontend (MVP)
+Cankaya Hospital Management System (MERN Stack)
+SENG 429 - Enterprise Application Fundamentals dersi kapsamında geliştirilmiş, hastane randevu ve yönetim süreçlerini dijitalleştiren tam kapsamlı bir kurumsal web uygulamasıdır.
 
-This project is the React.js frontend of the Cankaya Hospital Appointment System, developed as part of SENG 429 – Enterprise Application Development.
-The system includes three main user roles (Patient, Doctor, Admin) and demonstrates the core flows of a MERN-based hospital management platform.
+ Proje Hakkında
+Bu uygulama; yönetici (Admin), doktor ve hasta rollerine sahip kullanıcıların hastane süreçlerini yönetmesini sağlar. Admin kullanıcılar sistemdeki tüm veri trafiğini (doktor/hasta ekleme, raporlama) yönetirken, doktorlar randevularını takip edebilir, hastalar ise online randevu alabilir.
 
-This delivery represents the Minimum Viable Product (MVP) version, focusing on required navigation, CRUD operations, routing, and basic API integration.
+🛠️ Kullanılan Teknolojiler
+Frontend: React.js, React Router, Recharts (İstatistikler), Axios.
 
-Tech Stack
+Backend: Node.js, Express.js.
 
-React + Vite
+Veritabanı: MongoDB & Mongoose.
 
-React Router
+Kimlik Doğrulama: JWT (JSON Web Token).
 
-Axios / Fetch
+Stil: Custom CSS3 (Responsive Design).
 
-CSS (Custom Layout Styling)
+Gereksinim Karşılama 
 
-JavaScript ES6
+En az 5 Entity		User, Doctor, Patient, Appointment, Specialization.
+Composite Relationship	Appointment nesnesi hem Doctor hem de Patient referanslarını içerir.
+CRUD İşlemleri		Doktor, Hasta ve Randevu yönetimi için tam CRUD desteği.
+Aggregation & Filter	Branş bazlı randevu sayıları ve periyodik (Günlük/Haftalık/Aylık) istatistik raporları.
+RESTful API		/api/admin, /api/auth, /api/appointments gibi modüler rotalar.
+Role-Based Auth		Admin, Doktor ve Hasta rolleri için farklılaştırılmış yetkilendirme.
 
-Backend base URL:
-http://localhost:5000/api
 
-Project Structure
+Proje Mimarisi
+Plaintext
+/Seng429
+├── /server             # Node.js & Express Backend
+│   ├── /controllers    # İş mantığı (Admin, Doctor, Appointment)
+│   ├── /middleware     # Auth & Error Handling
+│   ├── /models         # Mongoose Şemaları (User, Appointment, vb.)
+│   └── /routes         # API Endpoint tanımları
+├── /src                # React Frontend
+│   ├── /pages          # AdminPage, LoginPage, DoctorPage, PatientPage
+│   ├── /services       # API (Axios) bağlantıları
+│   └── /styles         # Layout ve Bileşen stilleri
+└── package.json        # Bağımlılıklar ve Scriptler
 
-client/
-├─ package.json
-├─ .env.example
-├─ README.md
-├─ src/
-│ ├─ index.js (or main.jsx)
-│ ├─ App.js
-│ ├─ pages/
-│ │ ├─ LoginPage.jsx
-│ │ ├─ PatientPage.jsx
-│ │ ├─ DoctorPage.jsx
-│ │ └─ AdminPage.jsx
-│ ├─ api/
-│ │ └─ api.js
-│ ├─ components/
-│ └─ styles/
-│ └─ layout.css
-└─ screenshots/
-├─ home.png
-├─ admin.png
-└─ form.png
+Kurulum ve Çalıştırma
+1. Depoyu Klonlayın
 
-Installation
+Bash
+git clone <https://github.com/bilgekucukcakmak/Seng429>
+cd Seng429
 
-cd client
+
+2. Backend Kurulumu
+cd server
+
+Bash
 npm install
+.env dosyanızı oluşturun:
 
-Running the Application
+Kod snippet'i
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=sifrem
+DB_NAME=SENG429_db
 
+Bash
+npm start
+
+
+3. Frontend Kurulumu
+Ana klasöre dönün ve bağımlılıkları yükleyin:
+
+Bash
+npm install
+React uygulamasını başlatın:
+
+Bash
 npm run dev
 
-The application runs at:
-http://localhost:5173
+ Özellikler
+Dinamik Raporlama: Recharts kütüphanesi ile branş ve doktor bazlı randevu analizi.
 
-Environment Variables
+Poliklinik Yönetimi: Sarı buton detay modalı ile branşlardaki aktif doktorları görüntüleme.
 
-.env.example file contains:
+Randevu Takvimi: Haftalık/Aylık periyotlarda randevu yoğunluk takibi.
 
-REACT_APP_API_URL=http://localhost:5000/api
+Kullanıcı Yönetimi: Admin panelinden rol bazlı kullanıcı ekleme, silme ve güncelleme.
 
-Before running the project, create a .env file and copy the variable above.
+Notlar
 
-MVP Scope Explanation
+Uygulama varsayılan olarak http://localhost:5173 (Vite) adresinde çalışır.
 
-This frontend implements all required MVP-level features for SENG 429.
-
-Main Listing Page
-
-Patients can view their appointments.
-
-Doctors can view today’s appointments.
-
-Admin can view doctor and patient listings.
-
-Admin / Management View
-Admin can:
-
-Add a doctor
-
-Edit a doctor
-
-Delete a doctor
-
-Search doctors or patients
-
-View clinic lists and report summaries
-
-Create / Edit Form Pages
-Implemented forms include:
-
-Appointment creation form (patient)
-
-Doctor add/edit form (admin)
-Both forms include validation and display error messages when necessary.
-
-Routing (React Router)
-/ → Login
-/patient → Patient panel
-/doctor → Doctor panel
-/admin → Admin panel
-
-Stateful Components
-
-Appointment lists
-
-Patient profile editing
-
-Doctor appointment detail view
-
-Admin CRUD tables and search functionality
-
-Stateless Components
-
-Sidebar
-
-Profile section
-
-Layout and UI elements
-
-API Integration
-The frontend communicates with the backend using Axios/Fetch for:
-
-Fetching appointment lists
-
-Creating new appointments
-
-Updating and deleting items (admin)
-
-Runtime API base URL is provided via environment variables.
-
-Screenshots Folder
-
-patient.png - patient information
-doctor.png – doctor listing
-admin.png – admin dashboard
-login.png – appointment form with validation messages
+API istekleri http://localhost:5001/api adresine yönlendirilir.
