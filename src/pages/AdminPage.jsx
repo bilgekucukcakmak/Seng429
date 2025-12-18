@@ -6,7 +6,7 @@ import "../styles/layout.css";
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
-import {
+import api, {
       getAppointmentsBySpecialization,
       getAllUsers,
       deleteUser,
@@ -31,7 +31,7 @@ const [period, setPeriod] = useState('month');  // 'day', 'week', 'month'
 const [specializationData, setSpecializationData] = useState([]);
 const [doctorData, setDoctorData] = useState([]);
 const [selectedSpec, setSelectedSpec] = useState(null);
-
+const [selectedLog, setSelectedLog] = useState(null); // Tıklanan logu tutacak
     // --- CANLI VERİ STATE'LERİ ---
     const [specializations, setSpecializations] = useState([]);
     const [reports, setReports] = useState(null);
@@ -272,6 +272,83 @@ const handleSpecializationClick = (data) => {
             setEditMessage({ type: 'error', text: 'Güncelleme başarısız oldu: ' + (error.response?.data || 'Sunucu hatası.') });
         }
     };
+// State ekle
+const [logs, setLogs] = useState([]);
+
+// Veri çekme fonksiyonunu bu şekilde güncelleyin
+const fetchLogs = async () => {
+    try {
+         const res = await api.get('/admin/logs');
+        setLogs(res.data);
+    } catch (err) {
+        console.error("Loglar yüklenemedi:", err);
+        setLogs([]);
+    }
+};
+
+// renderLogs Fonksiyonu
+function renderLogs() {
+    return (
+        <div className="card">
+            <h1 className="admin-title">Sistem Hareket İzleme</h1>
+            <table className="admin-table">
+                <thead>
+                    <tr>
+                        <th>Tarih</th>
+                        <th>İşlem</th>
+                        <th>Kullanıcı ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {logs.map(log => {
+                        let parsedDetail = {};
+                        try { parsedDetail = JSON.parse(log.details); } catch(e) { parsedDetail = {id: log.details}; }
+
+                        return (
+                            <tr key={log.id}
+                                onClick={() => setSelectedLog(parsedDetail)}
+                                style={{cursor: 'pointer'}}
+                                className="hover-row">
+                                <td>{new Date(log.created_at).toLocaleString('tr-TR')}</td>
+                                <td><span className="chip-button chip-info">{log.action}</span></td>
+                                <td>{parsedDetail.id || "Bilinmiyor"}</td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+
+
+            {selectedLog && (
+                <div className="modal-backdrop">
+                    <div className="modal" style={{ borderLeft: '5px solid #ffc107', padding: '20px' }}>
+                        <h2>İşlem Detayı</h2>
+                        <div style={{ marginTop: '15px', lineHeight: '2' }}>
+                            {/* ID sadece numara olarak görünmeli */}
+                            <p><strong>Silinen ID:</strong> {selectedLog.id}</p>
+
+                            {/* Rol kontrolü: Backend 'doctor' veya 'patient' göndermeli */}
+                            <p><strong>Rol:</strong> {selectedLog.role === 'doctor' ? '👨‍⚕️ Doktor' : '👤 Hasta'}</p>
+
+                            {/* İsim alanı: Backend 'fullName' göndermeli */}
+                            <p><strong>Ad Soyad:</strong> {selectedLog.fullName || 'Bilgi Mevcut Değil'}</p>
+
+                            {selectedLog.role === 'doctor' && (
+                                <>
+                                    <p><strong>Ünvan:</strong> {selectedLog.title || 'N/A'}</p>
+                                    <p><strong>Branş:</strong> {selectedLog.specialization || 'N/A'}</p>
+                                </>
+                            )}
+                        </div>
+                        <button className="modal-button modal-cancel" onClick={() => setSelectedLog(null)} style={{ marginTop: '20px' }}>
+                            Kapat
+                        </button>
+                    </div>
+                </div>
+            )}
+                </div>
+            );
+        }
 
 
     /* ================= RENDER SECTIONS ================= */
@@ -559,6 +636,8 @@ const handleSpecializationClick = (data) => {
         );
     }
 
+// State ekle
+
 
     // --- POLİKLİNİK DETAY MODALI ---
     function renderClinicDetailModal() {
@@ -792,7 +871,7 @@ const handleSpecializationClick = (data) => {
                     </div>
                 </>
             );
-        }
+}
 
         // ANA RETURN BLOĞU
         return (
@@ -802,48 +881,29 @@ const handleSpecializationClick = (data) => {
                 {renderClinicDetailModal()}
 
                 {/* SOL MENÜ (Sidebar) */}
-                <aside className="app-sidebar">
-                    <div>
-                        <h2 className="app-sidebar-title">Cankaya Hospital</h2>
-                        <p className="app-sidebar-subtitle">@{user?.username || "admin"} · yönetici</p>
+               {/* SOL MENÜ (Sidebar) */}
+               <aside className="app-sidebar">
+                   <div>
+                       <h2 className="app-sidebar-title">Cankaya Hospital</h2>
+                       <p className="app-sidebar-subtitle">@{user?.username || "admin"} · yönetici</p>
 
-                        <div className="sidebar-buttons">
-                            <button
-                                className={"sidebar-button " + (activeSection === "overview" ? "sidebar-button-active" : "")}
-                                onClick={() => setActiveSection("overview")}>
-                                Genel Bakış
-                            </button>
+                       <div className="sidebar-buttons">
+                           <button className={"sidebar-button " + (activeSection === "overview" ? "sidebar-button-active" : "")} onClick={() => setActiveSection("overview")}>Genel Bakış</button>
+                           <button className={"sidebar-button " + (activeSection === "doctors" ? "sidebar-button-active" : "")} onClick={() => setActiveSection("doctors")}>Doktorlar</button>
+                           <button className={"sidebar-button " + (activeSection === "patients" ? "sidebar-button-active" : "")} onClick={() => setActiveSection("patients")}>Hastalar</button>
+                           <button className={"sidebar-button " + (activeSection === "clinics" ? "sidebar-button-active" : "")} onClick={() => setActiveSection("clinics")}>Poliklinikler</button>
+                           <button className={"sidebar-button " + (activeSection === "reports" ? "sidebar-button-active" : "")} onClick={() => setActiveSection("reports")}>Raporlar</button>
 
-                            <button
-                                className={"sidebar-button " + (activeSection === "doctors" ? "sidebar-button-active" : "")}
-                                onClick={() => setActiveSection("doctors")}>
-                                Doktorlar
-                            </button>
-
-                            <button
-                                className={"sidebar-button " + (activeSection === "patients" ? "sidebar-button-active" : "")}
-                                onClick={() => setActiveSection("patients")}>
-                                Hastalar
-                            </button>
-
-                            <button
-                                className={"sidebar-button " + (activeSection === "clinics" ? "sidebar-button-active" : "")}
-                                onClick={() => setActiveSection("clinics")}>
-                                Poliklinikler
-                            </button>
-
-                            <button
-                                className={"sidebar-button " + (activeSection === "reports" ? "sidebar-button-active" : "")}
-                                onClick={() => setActiveSection("reports")}>
-                                Raporlar
-                            </button>
-                        </div>
-                    </div>
-
-                    <button className="logout-button" onClick={onLogout}>
-                        Çıkış
-                    </button>
-                </aside>
+                           {/* Sistem Hareketleri Butonu */}
+                           <button
+                               className={"sidebar-button " + (activeSection === "logs" ? "sidebar-button-active" : "")}
+                               onClick={() => { setActiveSection("logs"); fetchLogs(); }}>
+                               Sistem Hareketleri
+                           </button>
+                       </div>
+                   </div>
+                   <button className="logout-button" onClick={onLogout}>Çıkış</button>
+               </aside>
 
                 {/* SAĞ İÇERİK (Main Content) */}
                 <main className="app-main">
@@ -852,6 +912,7 @@ const handleSpecializationClick = (data) => {
                     {activeSection === "patients" && renderPatientsList()}
                     {activeSection === "clinics" && renderClinics()}
                     {activeSection === "reports" && renderReports()}
+                    {activeSection === "logs" && renderLogs()} {/* Log tablosunu burada gösteriyoruz */}
                     {activeSection === "add" && renderAddUser()}
                 </main>
             </div>

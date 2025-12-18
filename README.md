@@ -88,3 +88,5 @@ Notlar
 Uygulama varsayılan olarak http://localhost:5173 (Vite) adresinde çalışır.
 
 API istekleri http://localhost:5001/api adresine yönlendirilir.
+
+"MySQL kullanılmıştır, lütfen ekteki SQL dosyasını import edin"

@@ -3,7 +3,20 @@
 import pool from '../db.js';
 
 // --- Poliklinik Yönetimi ---
+// Log kaydetmek için yardımcı fonksiyon
+const createLog = async (adminId, action, details) => {
+    try {
+         const finalAdminId = adminId || null;
 
+        await pool.execute(
+            "INSERT INTO logs (admin_id, action, details) VALUES (?, ?, ?)",
+            [finalAdminId, action, details]
+        );
+        console.log("✅ Log başarıyla kaydedildi:", action); // Terminale bakacağız
+    } catch (err) {
+        console.error("❌ LOG KAYDEDİLEMEDİ! Hata:", err.message);
+    }
+};
 // 1. Tüm Poliklinikleri Çekme
 export const getSpecializations = async (req, res) => {
     try {
@@ -61,6 +74,16 @@ export const getGeneralReports = async (req, res) => {
     }
 };
 
+// adminController.js
+export const getLogs = async (req, res) => {
+    try {
+        const [logs] = await pool.execute('SELECT * FROM logs ORDER BY created_at DESC');
+        res.status(200).json(logs);
+    } catch (error) {
+        console.error('Log çekme hatası:', error);
+        res.status(500).send('Sunucu hatası.');
+    }
+};
 
 // --- KULLANICI YÖNETİMİ ---
 
@@ -128,54 +151,77 @@ export const getAllUsers = async (req, res) => {
 
 
 // 5. Kullanıcı Silme
+// server/controllers/adminController.js
+
 export const deleteUser = async (req, res) => {
-    const userId = req.params.id;
+    const { id } = req.params;
+    const adminId = req.user?.id;
+
     try {
-        // users tablosundan silmek, ilişkili tabloları (CASCADE) otomatik silmeli
-        const [result] = await pool.execute('DELETE FROM users WHERE id = ?', [userId]);
+        // 1. ADIM: Silmeden önce bilgileri çek (Sütun isimlerine dikkat: d_first, p_first vb.)
+        const [userRows] = await pool.execute(
+            `SELECT u.role, d.first_name as d_first, d.last_name as d_last, d.specialization, d.title,
+                    p.first_name as p_first, p.last_name as p_last
+             FROM users u
+             LEFT JOIN doctors d ON u.id = d.user_id
+             LEFT JOIN patients p ON u.id = p.user_id
+             WHERE u.id = ?`, [id]
+        );
 
-        if (result.affectedRows === 0) {
-            return res.status(404).send('Kullanıcı bulunamadı.');
-        }
-        res.status(200).send('Kullanıcı başarıyla silindi.');
+        if (userRows.length === 0) return res.status(404).send('Kullanıcı bulunamadı.');
 
+        const userData = userRows[0];
+
+        // 2. ADIM: JSON Objesini Hazırla
+        const detailObj = {
+            id: id,
+            role: userData.role,
+            fullName: userData.role === 'doctor'
+                ? `${userData.title || 'Dr.'} ${userData.d_first} ${userData.d_last}`
+                : `${userData.p_first} ${userData.p_last}`,
+            specialization: userData.specialization || null,
+            title: userData.title || null
+        };
+
+        // 3. ADIM: Kullanıcıyı Sil
+        await pool.execute('DELETE FROM users WHERE id = ?', [id]);
+
+        // 4. ADIM: LOG KAYDI (Sadece createLog kullanın, pool.execute ile manuel eklemeyin)
+        // createLog fonksiyonu zaten INSERT işlemini kendi içinde yapıyor.
+        await createLog(adminId, 'KULLANICI_SILINDI', JSON.stringify(detailObj));
+
+        res.status(200).send('Kullanıcı başarıyla silindi ve loglandı.');
     } catch (error) {
-        console.error('Kullanıcı silme hatası:', error);
-        res.status(500).send('Sunucu hatası.');
+        console.error("Silme hatası:", error);
+        res.status(500).send('Hata oluştu.');
     }
 };
-
 
 export const getAppointmentStats = async (req, res) => {
     try {
         const { period } = req.query;
-
         let dateFilter = '';
-        if (period === 'day') {
-            dateFilter = 'AND DATE(a.appointment_date) = CURDATE()';
-        } else if (period === 'week') {
-            dateFilter = 'AND a.appointment_date >= DATE_SUB(NOW(), INTERVAL 7 DAY)';
-        } else if (period === 'month') {
-            dateFilter = 'AND a.appointment_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
-        }
 
+        if (period === 'day') dateFilter = 'AND DATE(a.appointment_date) = CURDATE()';
+        else if (period === 'week') dateFilter = 'AND a.appointment_date >= DATE_SUB(NOW(), INTERVAL 7 DAY)';
+        else if (period === 'month') dateFilter = 'AND a.appointment_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)';
+
+        // DÜZELTİLMİŞ SORGU
         const query = `
             SELECT
                 d.specialization AS department,
                 COUNT(a.id) AS count
             FROM appointments a
-            JOIN doctors d ON a.doctor_id = d.id
+            JOIN doctors d ON a.doctor_id = d.id  -- Sadece d.id'ye bağla
             WHERE a.status != 'canceled'
             ${dateFilter}
-            GROUP BY d.specialization
-            HAVING COUNT(a.id) > 0
+            GROUP BY d.specialization -- Bu satır 1140 hatasını çözer
         `;
 
         const [rows] = await pool.execute(query);
         res.status(200).json(rows);
-
     } catch (error) {
-        console.error('Appointment stats error:', error);
+        console.error('Stats Hatası:', error);
         res.status(500).send('Sunucu hatası');
     }
 };
@@ -227,6 +273,25 @@ export const getDoctorsBySpecialization = async (req, res) => {
     }
 };
 
+
+
+// Örnek: Doktor silme fonksiyonunun içine ekle
+export const deleteDoctor = async (req, res) => {
+    const { id } = req.params;
+    try {
+        // ... silme işlemleri ...
+
+        // Daha önce konuştuğumuz Log özelliğini de ESM yapısına göre ekleyelim:
+        await createLog(req.user.id, 'DOKTOR_SILINDI', `ID: ${id} olan doktor silindi.`);
+
+        res.json({ message: "Doktor başarıyla silindi." });
+    } catch (err) {
+        res.status(500).json({ error: "Sunucu hatası" });
+    }
+};
+
+
+
 // 6. DOKTOR GÜNCELLEME (YENİ EKLEME)
 export const updateDoctor = async (req, res) => {
     // Rota parametresi user_id olarak geçiyor
@@ -242,12 +307,6 @@ export const updateDoctor = async (req, res) => {
 
     // Veritabanı işlemleri (Multi-Update veya Transaction kullanılması önerilir)
     try {
-        // --- ADIM 1: users tablosunu güncelle (email, first_name, last_name) ---
-        // Not: Şu anki SQL, users tablosundaki first_name/last_name'i değil,
-        // doktor/hasta tablosundakini kullanıyor gibi görünüyor.
-        // Güvenli olması için doctors tablosunu güncelliyoruz.
-
-        // --- ADIM 2: doctors tablosunu güncelle ---
         const [updateDoctorResult] = await pool.execute(
             `UPDATE doctors
              SET
