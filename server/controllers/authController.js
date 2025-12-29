@@ -23,28 +23,37 @@ const getRelatedId = async (tableName, userId) => {
 
 // --- REGISTER CONTROLLER ---
 export const registerUser = async (req, res) => {
-    const { email, password, role, first_name, last_name, specialization } = req.body;
+    // 1. ADIM: req.body'den akademik_geçmiş ve ünvanı (title) da alıyoruz
+    const { email, password, role, first_name, last_name, specialization, title, academic_background } = req.body;
 
     try {
         const password_hash = await bcrypt.hash(password, saltRounds);
 
-        // 1. users tablosuna ekle
+        // users tablosuna ekle
         const [userResult] = await pool.execute(
             'INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)',
             [email, password_hash, role]
         );
         const userId = userResult.insertId;
 
-        // 2. Role göre tabloya ekleme
+        // Role göre tabloya ekleme
         if (role === 'patient') {
             await pool.execute(
                 'INSERT INTO patients (user_id, first_name, last_name) VALUES (?, ?, ?)',
                 [userId, first_name, last_name]
             );
         } else if (role === 'doctor') {
+            // 2. ADIM: doctors tablosuna ünvan ve akademik geçmişi de ekliyoruz
             await pool.execute(
-                'INSERT INTO doctors (user_id, first_name, last_name, specialization) VALUES (?, ?, ?, ?)',
-                [userId, first_name, last_name, specialization || 'Genel']
+                'INSERT INTO doctors (user_id, first_name, last_name, specialization, title, academic_background) VALUES (?, ?, ?, ?, ?, ?)',
+                [
+                    userId,
+                    first_name,
+                    last_name,
+                    specialization || 'Genel',
+                    title || 'Dr.',
+                    academic_background || null // Eğer boşsa NULL kaydet
+                ]
             );
         }
 

@@ -4,10 +4,10 @@ import express from 'express';
 // Controller'ları import et
 import {
     createAppointment,
-    getPatientAppointments,
     getDoctorAppointments,
+    getPatientAppointments,
     updateAppointment,
-    // YENİ EKLENEN: Slot çekme fonksiyonu
+    getPatientAppointmentsByTc,
     getAvailableSlots
 } from '../controllers/appointmentController.js';
 
@@ -26,16 +26,14 @@ router.get('/slots/:doctorId/:date', ensureAuthenticated, getAvailableSlots);
 // protect -> ensureAuthenticated olarak düzeltildi
 router.post('/', ensureAuthenticated, createAppointment);
 
-// 2. Hastanın Randevularını Çekme (GET /api/appointments/patient)
-// protect -> ensureAuthenticated olarak düzeltildi
-router.get('/patient', ensureAuthenticated, getPatientAppointments);
-
 // 3. Doktorun Randevularını Çekme (GET /api/appointments/doctor)
 // protect -> ensureAuthenticated olarak düzeltildi
 router.get('/doctor', ensureAuthenticated, getDoctorAppointments);
 
+router.get('/patient', ensureAuthenticated, getPatientAppointments);
 // 4. Randevu Durumunu/Notunu Güncelleme (PATCH /api/appointments/:id)
 // protect -> ensureAuthenticated olarak düzeltildi
 router.patch('/:id', ensureAuthenticated, updateAppointment);
 
+router.get('/patient/tc/:tcNo', getPatientAppointmentsByTc);
 export default router;

@@ -11,7 +11,29 @@ const api = axios.create({
         'Content-Type': 'application/json',
     },
 });
+// services/api.js (Ekleme yapın)
+export const getPatientHistory = (tc) => api.get(`/patients/history/${tc}`);
 
+// DoctorPage.jsx içindeki handleSearchTc fonksiyonu
+async function handleSearchTc(e) {
+    e.preventDefault();
+    const trimmed = searchTc.trim();
+    if (!trimmed) return;
+
+    try {
+        // 1. Hasta kimliğini getir (Bu kısım /search?tc= üzerinden çalışacak)
+        const response = await getPatientByTc(trimmed);
+        setPatientInfo(response.data);
+
+        // 2. TÜM tıbbi geçmişi getir (Yeni /history/:tcNo rotası üzerinden)
+        const historyRes = await getPatientHistory(trimmed);
+        setQueriedPatientAppointments(historyRes.data || []);
+
+    } catch (error) {
+        console.error("Veri çekme hatası:", error);
+        setPatientError("Bilgiler çekilemedi. Lütfen oturumunuzu kontrol edin.");
+    }
+}
 // --- JWT TOKEN YÖNETİMİ ---
 export const setAuthToken = (token) => {
     if (token) {
@@ -90,10 +112,18 @@ export const updateDoctor = async (userId, data) => {
 };
 
 // *************** HASTA FONKSİYONLARI ***************
-export const getPatientProfile = () => api.get('/patients/profile');
-export const updatePatientProfile = (data) => api.patch('/patients/profile', data);
-export const getPatientByTc = (tc) => api.get(`/patients/search`, { params: { tc } });
-export const getPatientAppointments = () => api.get(`/appointments/patient`);
+// src/services/api.js
+export const getPatientProfile = () => {
+    return api.get('/patients/profile'); // Backend'deki router.get('/profile', ...) ile aynı olmalı
+};
+export const updatePatientProfile = (data) => {
+    return api.put('/patients/profile/update', data);
+};
+export const getPatientByTc = (tc) => {
+    return api.get('/patients/search', {
+        params: { tc: tc } // Query string olarak ?tc=... ekler
+    });
+};export const getPatientAppointments = () => api.get(`/appointments/patient`);
 export const createAppointment = (payload) => api.post('/appointments', payload);
 
 /**
@@ -106,37 +136,31 @@ export const getAvailableSlots = (doctorId, date) =>
 
 // *************** DOKTOR FONKSİYONLARI ***************
 export const getAllDoctors = () => api.get('/doctors');
-export const getDoctorProfile = () => api.get('/doctors/profile');
-export const updateDoctorProfile = (data) => api.patch('/doctors/profile', data);
-export const getDoctorLeaveDates = () => api.get('/doctors/leave');
-export const updateDoctorLeaveDates = (leaveDates) => api.patch('/doctors/leave', { leaveDates });
+export const getDoctorProfile = () => api.get('/doctor/profile');
+export const updateDoctorProfile = (data) => api.patch('/doctor/profile', data);
+export const getDoctorLeaveDates = () => api.get('/doctor/leave-dates');
+export const updateDoctorLeaveDates = (leaveDates) => api.patch('/doctor/leave', { leaveDates });
 export const getDoctorAppointments = () => api.get('/appointments/doctor');
 
-// *************** RANDEVU GÜNCELLEME (DOKTOR NOTU DAHİL) ***************
-export const updateAppointmentStatus = (appointmentId, status, doctorNote) => {
-    const data = {};
 
-    // Status doluysa (scheduled, completed, canceled vb.) ekle
-    if (status) {
-        data.status = status;
-    }
-
-    // Backend 'note' beklediği için alan adını note olarak ayarladık
-    if (doctorNote !== undefined && doctorNote !== null) {
-        data.note = doctorNote;
-    }
-
-    return api.patch(`/appointments/${appointmentId}`, data);
+// api.js içindeki updateAppointmentStatus fonksiyonu şuna benzemeli:
+export const updateAppointmentStatus = (id, status, note, prescription) => {
+    return api.patch(`/appointments/${id}`, { status, note, prescription });
 };
+
+
+export const getDoctorPerformance = () => api.get('/admin/doctor-performance');
+
+
 
 // *************** EKSTRA YARDIMCI FONKSİYONLAR ***************
 
 /**
  * TC No ile randevu geçmişi sorgulama
  */
-export const getPatientAppointmentsByTc = (tcNo) =>
-    api.get(`/appointments/patient/tc/${tcNo}`);
-
+export const getPatientAppointmentsByTc = (tcNo) => {
+    return api.get(`/appointments/patient/tc/${tcNo}`);
+};
 /**
  * Hafta sonu kontrolü (Acil Doktor istisnası ile)
  * Bu fonksiyonu PatientPage.jsx içinde tarih seçerken kullanabilirsiniz.

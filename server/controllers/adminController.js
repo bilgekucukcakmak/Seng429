@@ -17,6 +17,8 @@ const createLog = async (adminId, action, details) => {
         console.error("❌ LOG KAYDEDİLEMEDİ! Hata:", err.message);
     }
 };
+
+
 // 1. Tüm Poliklinikleri Çekme
 export const getSpecializations = async (req, res) => {
     try {
@@ -95,52 +97,54 @@ export const getAllUsers = async (req, res) => {
                 u.id,
                 u.email,
                 u.role,
-                p.first_name AS patient_first_name,
-                p.last_name AS patient_last_name,
                 d.first_name AS doctor_first_name,
                 d.last_name AS doctor_last_name,
+                p.first_name AS patient_first_name,
+                p.last_name AS patient_last_name,
                 d.specialization,
-                d.title  -- UNVAN ALANI EKLEDİK
+                d.title,
+                d.academic_background,
+                d.leave_dates -- VERİTABANINDAKİ İZİN SÜTUNU
              FROM users u
-             LEFT JOIN patients p ON u.id = p.user_id
              LEFT JOIN doctors d ON u.id = d.user_id
+             LEFT JOIN patients p ON u.id = p.user_id
              ORDER BY u.id ASC`
         );
 
-        // Kullanıcı verilerini temizle ve birleştir
         const combinedUsers = users.map(user => {
             let firstName = null;
             let lastName = null;
             let specialization = null;
-            let title = null; // UNVAN ALANI
+            let title = null;
+            let academic_background = null;
+            let leave_dates = null; // Değişkeni tanımladık
 
             if (user.role === 'patient') {
-                // Hasta ismini kullan, NULL ise e-postadan isim al
                 firstName = user.patient_first_name || user.email.split('@')[0];
                 lastName = user.patient_last_name;
             } else if (user.role === 'doctor') {
-                // Doktor ismini kullan, NULL ise e-postadan isim al
                 firstName = user.doctor_first_name || user.email.split('@')[0];
                 lastName = user.doctor_last_name;
                 specialization = user.specialization;
-                title = user.title; // UNVAN ALANINI YÜKLÜYORUZ
+                title = user.title;
+                academic_background = user.academic_background;
+                leave_dates = user.leave_dates; // SQL'den gelen veriyi bağladık
             } else {
-                 // Admin veya diğer roller için sadece e-posta bazlı isim kullan
                  firstName = user.email.split('@')[0];
             }
-
 
             return {
                 id: user.id,
                 email: user.email,
                 role: user.role,
                 first_name: firstName,
-                last_name: lastName || '', // NULL ise boş string döndür
+                last_name: lastName || '',
                 specialization: specialization,
-                title: title, // UNVAN EKLEME
+                title: title,
+                academic_background: academic_background,
+                leave_dates: leave_dates // Frontend'e gönderilecek objeye ekledik
             };
         });
-
 
         res.status(200).json(combinedUsers);
     } catch (error) {
@@ -148,7 +152,6 @@ export const getAllUsers = async (req, res) => {
         res.status(500).send('Sunucu hatası.');
     }
 };
-
 
 // 5. Kullanıcı Silme
 // server/controllers/adminController.js
@@ -293,35 +296,40 @@ export const deleteDoctor = async (req, res) => {
 
 
 // 6. DOKTOR GÜNCELLEME (YENİ EKLEME)
+// server/controllers/adminController.js (~300. satır civarı)
+
 export const updateDoctor = async (req, res) => {
-    // Rota parametresi user_id olarak geçiyor
     const userId = req.params.id;
 
-    // Frontend'den gelen veriler
-    const { email, first_name, last_name, specialization, title } = req.body;
+    // 1. DÜZELTME: Body'den gelen isme 'academicData' deyin (çakışmayı önlemek için)
+    const { email, first_name, last_name, specialization, title, academic_background: academicData } = req.body;
 
-    // Şifre burada güncellenmediği için, şifre alanı hariç güncellemeler yapılır.
     if (!email || !first_name || !last_name || !specialization || !title) {
-        return res.status(400).send("E-posta, Ad, Soyad, Uzmanlık ve Ünvan alanları zorunludur.");
+        return res.status(400).send("Zorunlu alanlar eksik.");
     }
 
-    // Veritabanı işlemleri (Multi-Update veya Transaction kullanılması önerilir)
     try {
+        // 2. DÜZELTME: Veritabanına yazılacak string'i burada hazırlayın
+        // academicData boşsa boş bir string kaydedelim
+        const finalAcademicBackground = Array.isArray(academicData)
+            ? academicData.join('\n')
+            : (academicData || "");
+
         const [updateDoctorResult] = await pool.execute(
             `UPDATE doctors
              SET
                  first_name = ?,
                  last_name = ?,
                  specialization = ?,
-                 title = ?
+                 title = ?,
+                 academic_background = ?
              WHERE
                  user_id = ?`,
-            [first_name, last_name, specialization, title, userId]
+            [first_name, last_name, specialization, title, finalAcademicBackground, userId]
         );
 
-        // Email güncellemesi (Opsiyonel ama mantıklı)
+        // Email güncellemesi
         await pool.execute('UPDATE users SET email = ? WHERE id = ?', [email, userId]);
-
 
         if (updateDoctorResult.affectedRows === 0) {
             return res.status(404).send('Doktor bulunamadı.');
@@ -334,7 +342,148 @@ export const updateDoctor = async (req, res) => {
 
     } catch (error) {
         console.error(`Doktor güncelleme hatası (ID: ${userId}):`, error);
-        // Eğer tabloda 'title' kolonu yoksa, hata burada fırlatılacaktır.
-        res.status(500).json({ message: 'Sunucu hatası. Güncelleme işlemi başarısız oldu.' });
+        res.status(500).json({ message: 'Sunucu hatası.' });
     }
 };
+
+export const getLeaveRequests = async (req, res) => {
+    try {
+        // Syntax hatasını önlemek için sorguyu tek bir temiz string olarak tanımlıyoruz
+        const query = `
+            SELECT
+                lr.id,
+                lr.doctor_id,
+                lr.start_date,
+                lr.end_date,
+                lr.status,
+                lr.request_date,
+                d.first_name,
+                d.last_name,
+                d.specialization,
+                d.title,
+                u.email
+            FROM leave_requests lr
+            JOIN users u ON lr.doctor_id = u.id
+            JOIN doctors d ON u.id = d.user_id
+            ORDER BY lr.request_date DESC`;
+
+        const [requests] = await pool.execute(query);
+        res.json(requests);
+    } catch (error) {
+        console.error("SQL Hatası Detayı:", error);
+        res.status(500).json({
+            message: "Veritabanı hatası.",
+            error: error.message
+        });
+    }
+};
+
+// 2. İzin Onaylama Fonksiyonu
+export const approveLeave = async (req, res) => {
+    const { requestId, doctorId, startDate } = req.body;
+
+    try {
+        // A. Talebin durumunu 'approved' olarak güncelle
+        await pool.execute(
+            'UPDATE leave_requests SET status = "approved" WHERE id = ?',
+            [requestId]
+        );
+
+        // B. Doktorun profilindeki (sarı rozetler) leave_dates sütununa ekle
+        const [doctor] = await pool.execute(
+            'SELECT leave_dates FROM doctors WHERE user_id = ?',
+            [doctorId]
+        );
+
+        let currentLeaves = [];
+        if (doctor[0] && doctor[0].leave_dates) {
+            currentLeaves = typeof doctor[0].leave_dates === 'string'
+                ? JSON.parse(doctor[0].leave_dates)
+                : doctor[0].leave_dates;
+        }
+
+        if (!currentLeaves.includes(startDate)) {
+            currentLeaves.push(startDate);
+        }
+
+        await pool.execute(
+            'UPDATE doctors SET leave_dates = ? WHERE user_id = ?',
+            [JSON.stringify(currentLeaves), doctorId]
+        );
+
+        res.json({ message: "İzin onaylandı ve profile işlendi." });
+    } catch (error) {
+        res.status(500).json({ message: "Sunucu hatası: " + error.message });
+    }
+};
+
+// server/controllers/adminController.js
+export const rejectLeave = async (req, res) => {
+    // Frontend'den 'requestId' adıyla gönderdiğin için buradan da aynı isimle almalısın
+    const { requestId } = req.body;
+    try {
+        await pool.execute(
+            'UPDATE leave_requests SET status = "rejected" WHERE id = ?',
+            [requestId]
+        );
+        res.json({ message: "Talep reddedildi." });
+    } catch (error) {
+        console.error("Reddetme hatası:", error);
+        res.status(500).json({ message: "İşlem başarısız." });
+    }
+};
+
+export const getDoctorPerformance = async (req, res) => {
+    try {
+        const [rows] = await pool.execute(`
+            SELECT
+                d.id,
+                CONCAT(d.title, ' ', d.first_name, ' ', d.last_name) AS doctor,
+                d.specialization,
+                COUNT(a.id) AS totalAppointments,
+                SUM(CASE WHEN a.status = 'completed' THEN 1 ELSE 0 END) AS completed,
+                SUM(CASE WHEN a.status = 'canceled' THEN 1 ELSE 0 END) AS canceled
+            FROM doctors d
+            LEFT JOIN appointments a ON d.id = a.doctor_id
+            GROUP BY d.id
+        `);
+
+        const result = rows.map(d => {
+            const total = parseInt(d.totalAppointments) || 0;
+            const comp = parseInt(d.completed) || 0;
+            const canc = parseInt(d.canceled) || 0;
+
+            const completionRate = total > 0 ? (comp / total) * 100 : 0;
+            const cancelRate = total > 0 ? (canc / total) * 100 : 0;
+
+            // --- BURAYA YAPIŞTIRIYORSUNUZ ---
+            // Skor = (Tamamlanma Oranı * 1.0) - (İptal Oranı * 0.5)
+            let score = completionRate - (cancelRate * 0.5);
+
+            // Skoru 0-100 arasına hapset ve yuvarla
+            score = Math.max(0, Math.min(100, Math.round(score)));
+            // --------------------------------
+
+            let status = "normal";
+            if (cancelRate > 30) status = "risk";
+            else if (score >= 80) status = "high";
+
+            return {
+                id: d.id,
+                doctor: d.doctor,
+                specialization: d.specialization,
+                totalAppointments: total,
+                completionRate: Math.round(completionRate),
+                cancelRate: Math.round(cancelRate),
+                score: score, // Artık skor Frontend'e gidiyor
+                status: status
+            };
+        });
+
+        res.json(result);
+    } catch (err) {
+        console.error("Performans hatası:", err);
+        res.status(500).json({ message: "Veriler alınamadı" });
+    }
+};
+

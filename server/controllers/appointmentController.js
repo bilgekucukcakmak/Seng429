@@ -108,7 +108,25 @@ export const createAppointment = async (req, res) => {
     }
 };
 
-
+export const getTestResults = async (req, res) => {
+    const patientUserId = req.user.id;
+    try {
+        const patientId = await getPatientId(patientUserId);
+        const [results] = await pool.execute(
+            `SELECT a.id, a.appointment_date,
+                    d.first_name AS doctor_first_name, d.last_name AS doctor_last_name,
+                    a.test_results -- Tahlil verilerinin tutulduğu sütun
+             FROM appointments a
+             JOIN doctors d ON a.doctor_id = d.id
+             WHERE a.patient_id = ? AND a.test_results IS NOT NULL
+             ORDER BY a.appointment_date DESC`,
+            [patientId]
+        );
+        res.status(200).json(results);
+    } catch (error) {
+        res.status(500).send('Tahlil sonuçları yüklenemedi.');
+    }
+};
 // *******************************************************************
 // 5. Randevu Slotlarını Çekme (GET /api/appointments/slots/:doctorId/:date) (YENİ FONKSİYON)
 // *******************************************************************
@@ -176,47 +194,48 @@ export const getAvailableSlots = async (req, res) => {
     }
 };
 
+// server/controllers/appointmentController.js
 
-// *******************************************************************
-// 2. Hastanın Randevu Geçmişini Çekme (GET /api/appointments/patient)
-// *******************************************************************
-export const getPatientAppointments = async (req, res) => {
-    const patientUserId = req.user.id;
+// server/controllers/appointmentController.js
 
+
+// =======================================================
+// 📜 HASTA TC NO İLE TÜM GEÇMİŞİ GETİR
+// =======================================================
+// server/controllers/appointmentController.js
+
+// server/controllers/appointmentController.js
+
+// server/controllers/appointmentController.js
+// server/controllers/appointmentController.js
+// server/controllers/appointmentController.js
+
+// server/controllers/appointmentController.js
+export const getPatientAppointmentsByTc = async (req, res) => {
+    const { tcNo } = req.params;
     try {
-        const patientId = await getPatientId(patientUserId);
-
-        if (!patientId) {
-            return res.status(200).json([]);
-        }
-
-        const [appointments] = await pool.execute(
-            `SELECT
-                a.id,
-                a.appointment_date,
-                a.time,  -- TIME SÜTUNU EKLENDİ
-                a.reason,
-                a.status,
-                a.doctor_note,
+        const query = `
+            SELECT
+                a.id, a.appointment_date, a.doctor_note, a.status,
+                a.prescription, a.appointmentType,
+                a.test_results AS lab_report_url, -- EKLENDİ
+                'https://pacs-sistem-linki.com/view' AS radiology_url, -- ÖRNEK TEST VERİSİ
                 d.first_name AS doctor_first_name,
                 d.last_name AS doctor_last_name,
-                d.specialization
+                d.title AS doctor_title,
+                d.specialization AS doctor_branch
             FROM appointments a
+            JOIN patients p ON a.patient_id = p.id
             JOIN doctors d ON a.doctor_id = d.id
-            WHERE a.patient_id = ?
-            ORDER BY a.appointment_date DESC, a.time DESC`,
-            [patientId]
-        );
-
-        res.status(200).json(appointments);
-
+            WHERE p.tc_no = ?
+            ORDER BY a.appointment_date DESC
+        `;
+        const [rows] = await pool.execute(query, [tcNo]);
+        res.status(200).json(rows);
     } catch (error) {
-        console.error('Hasta randevu geçmişi çekme hatası:', error);
-        res.status(500).send('Sunucu hatası.');
+        res.status(500).send('Hata oluştu.');
     }
 };
-
-
 // *******************************************************************
 // 3. Doktorun Güncel Randevularını Çekme (GET /api/appointments/doctor)
 // *******************************************************************
@@ -231,23 +250,24 @@ export const getDoctorAppointments = async (req, res) => {
         }
 
         const [appointments] = await pool.execute(
-            `SELECT
-                a.id,
-                a.appointment_date,
-                a.time,  -- TIME SÜTUNU EKLENDİ
-                a.reason,
-                a.status,
-                a.doctor_note,
-                p.first_name AS patient_first_name,
-                p.last_name AS patient_last_name,
-                p.tc_no,
-                p.id AS patient_id
-            FROM appointments a
-            JOIN patients p ON a.patient_id = p.id
-            WHERE a.doctor_id = ?
-            ORDER BY a.appointment_date ASC, a.time ASC`,
-            [doctorId]
-        );
+                `SELECT
+                    a.id,
+                    a.appointment_date,
+                    a.time,
+                    a.reason,
+                    a.status,
+                    a.doctor_note,
+                    a.appointmentType, -- BU SATIRI EKLEMEN ŞART!
+                    p.first_name AS patient_first_name,
+                    p.last_name AS patient_last_name,
+                    p.tc_no,
+                    p.id AS patient_id
+                FROM appointments a
+                JOIN patients p ON a.patient_id = p.id
+                WHERE a.doctor_id = ?
+                ORDER BY a.appointment_date ASC, a.time ASC`,
+                [doctorId]
+            );
 
         res.status(200).json(appointments);
 
@@ -258,36 +278,93 @@ export const getDoctorAppointments = async (req, res) => {
 };
 
 
-// *******************************************************************
-// 4. Randevu Durumunu / Doktor Notunu Güncelleme (PATCH /api/appointments/:id)
-// *******************************************************************
 export const updateAppointment = async (req, res) => {
     const appointmentId = req.params.id;
-    const { status, note } = req.body;
+    const { status, note, prescription } = req.body;
 
     try {
-
         if (status === 'completed' || status === 'canceled') {
+            // TABLO İSMİNE DİKKAT: appointments (çoğul olmalı)
+            const query = `
+                UPDATE appointments
+                SET status = ?,
+                    doctor_note = ?,
+                    prescription = ?
+                WHERE id = ?
+            `;
 
-            const noteUpdate = (status === 'completed' && note !== undefined) ? ', doctor_note = ?' : '';
-            const params = [status, appointmentId];
-            if (noteUpdate) {
-                params.splice(1, 0, note);
+            // Sıralama: status (1), note (2), prescription (3), id (4)
+            const [result] = await pool.execute(query, [
+                status,
+                note || '',
+                prescription || '',
+                appointmentId
+            ]);
+
+            if (result.affectedRows === 0) {
+                return res.status(404).send('Randevu bulunamadı.');
             }
-
-            await pool.execute(
-                `UPDATE appointments SET status = ? ${noteUpdate} WHERE id = ?`,
-                params
-            );
-        }
-        else {
-            return res.status(400).send('Geçersiz durum veya eksik not.');
+        } else {
+            return res.status(400).send('Geçersiz durum.');
         }
 
-        res.status(200).send('Randevu başarıyla güncellendi.');
+        res.status(200).send('Başarıyla güncellendi.');
 
     } catch (error) {
-        console.error('Randevu güncelleme hatası:', error);
+        console.error('Randevu güncelleme hatası (SQL):', error);
+        res.status(500).send('Sunucu hatası: ' + error.message);
+    }
+};
+
+
+export const getPatientByTc = async (req, res) => {
+    const { tc } = req.query; // Query parametresinden TC'yi alıyoruz
+
+    try {
+        const [rows] = await pool.execute(
+            'SELECT id, first_name, last_name, tc_no, date_of_birth, gender, phone_number, email FROM patients WHERE tc_no = ?',
+            [tc]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: "Bu TC numarasına kayıtlı hasta bulunamadı." });
+        }
+
+        res.status(200).json(rows[0]);
+    } catch (error) {
+        console.error('Hasta arama hatası:', error);
         res.status(500).send('Sunucu hatası.');
+    }
+};
+
+export const getPatientAppointments = async (req, res) => {
+    try {
+        // req.user.id zaten giriş yapan kişinin Users tablosundaki ID'sidir.
+        const userId = req.user.id;
+
+        const [appointments] = await pool.execute(
+            `
+            SELECT
+                a.id, a.appointment_date, a.time, a.status, a.doctor_note,
+                a.prescription, a.test_results,
+                p.first_name AS patient_first_name, p.last_name AS patient_last_name,
+                p.tc_no AS patient_tc,
+                d.first_name AS doctor_first_name, d.last_name AS doctor_last_name,
+                d.title AS doctor_title, d.specialization
+            FROM appointments a
+            JOIN patients p ON a.patient_id = p.id
+            JOIN doctors d ON a.doctor_id = d.id
+            /* BURAYI DEĞİŞTİRDİK: patients tablosundaki user_id üzerinden filtrele */
+            WHERE p.user_id = ?
+            ORDER BY a.appointment_date DESC, a.time DESC
+            `,
+            [userId]
+        );
+
+        res.status(200).json(appointments);
+
+    } catch (error) {
+        console.error("❌ getPatientAppointments:", error);
+        res.status(500).json({ message: "Sunucu hatası" });
     }
 };

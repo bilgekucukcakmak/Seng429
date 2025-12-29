@@ -42,7 +42,7 @@ app.use('/api/patients', ensureAuthenticated, patientRoutes);
 app.use('/api/admin', ensureAuthenticated, adminRoutes); 
 
 // Doktor Listesi (Randevu oluşturmak için herkesin görmesi gerekebilir, JWT olmadan)
-app.use('/api/doctors', doctorRoutes); 
+app.use('/api/doctors', doctorRoutes);
 
 
 // --- 4. ANA DİZİN VE SUNUCU BAŞLATMA ---

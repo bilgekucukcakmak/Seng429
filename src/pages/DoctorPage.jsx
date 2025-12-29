@@ -1,21 +1,141 @@
-// src/pages/DoctorPage.jsx (NİHAİ VE TAM HALİ - Profil Görüntüleme/Düzenleme Geçişi Eklendi)
-
+// DoctorPage.jsx en üst kısım
 import { useEffect, useState } from "react";
 import "../styles/layout.css";
 import React from 'react';
-import {
+
+// 'api' kelimesini süslü parantezin başına, virgülle ayırarak ekle
+import api, {
     getDoctorAppointments,
     getPatientByTc,
     updateAppointmentStatus,
-    updateDoctorProfile, // Profil güncelleme API'si
+    updateDoctorProfile,
     getDoctorProfile,
     getDoctorLeaveDates,
     updateDoctorLeaveDates,
     getPatientAppointmentsByTc,
     initializeAuthToken,
+    getPatientHistory,
+} from "../services/api"; //
+// src/pages/DoctorPage.jsx
 
-} from "../services/api";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable"; // autoTable'ı bu şekilde import edin
 
+
+// --- PDF ÜRETME FONKSİYONU
+const fixTurkishChars = (text) => {
+    if (!text) return "";
+    return text
+        .replace(/ğ/g, "g").replace(/Ğ/g, "G")
+        .replace(/ü/g, "u").replace(/Ü/g, "U")
+        .replace(/ş/g, "s").replace(/Ş/g, "S")
+        .replace(/ı/g, "i").replace(/İ/g, "I")
+        .replace(/ö/g, "o").replace(/Ö/g, "O")
+        .replace(/ç/g, "c").replace(/Ç/g, "C");
+};
+const downloadPrescriptionPDF = (p) => {
+    const doc = new jsPDF();
+
+    // Rapor Başlığı
+    doc.setFontSize(20);
+    doc.setTextColor(242, 201, 76); // Çankaya Hospital Sarısı
+    doc.text("CANKAYA HOSPITAL", 20, 20);
+
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Tıbbi E-Reçete Belgesi", 20, 30);
+    doc.text(`Tarih: ${new Date(p.appointment_date).toLocaleDateString()}`, 150, 30);
+    doc.line(20, 35, 190, 35); // Çizgi
+
+    // Doktor ve Hasta Bilgileri
+    doc.text(`Doktor: ${p.doctor_title} ${p.doctor_first_name} ${p.doctor_last_name}`, 20, 45);
+    doc.text(`Poliklinik: ${p.specialization || "Genel"}`, 20, 52);
+    doc.text(`E-Reçete No: #REC-${p.id + 5000}`, 20, 59);
+
+    // İlaçlar
+    doc.setFontSize(14);
+    doc.text("Yazılan İlaçlar:", 20, 75);
+
+    doc.setFontSize(11);
+    const medicines = p.prescription.split(", ");
+    medicines.forEach((med, index) => {
+        doc.text(`- ${med}`, 25, 85 + (index * 7));
+    });
+
+    // Alt Not
+    doc.setFontSize(9);
+    doc.setTextColor(150, 150, 150);
+    doc.text("Bu belge elektronik ortamda oluşturulmuştur.", 20, 280);
+
+    // Dosyayı İndir
+    doc.save(`Recete_${p.id}.pdf`);
+};
+// --- PDF ÜRETME FONKSİYONU (Reçete Desteği Eklendi)
+const generatePDFReport = (appointment, patientDetails, doctorProfile, prescriptionList) => {
+    const doc = new jsPDF();
+
+    // Başlık
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.text("CANKAYA HOSPITAL", 105, 20, { align: "center" });
+
+    doc.setFontSize(14);
+    doc.text(fixTurkishChars("MUAYENE VE TANI RAPORU"), 105, 30, { align: "center" });
+    doc.line(20, 35, 190, 35);
+
+    autoTable(doc, {
+        startY: 40,
+        head: [[fixTurkishChars('BILGI TURU'), fixTurkishChars('DETAYLAR')]],
+        body: [
+            [fixTurkishChars('Rapor Tarihi'), new Date().toLocaleDateString('tr-TR')],
+            [fixTurkishChars('Randevu Tarihi'), formatDate(appointment.appointment_date)],
+            [fixTurkishChars('Hasta Ad Soyad'), fixTurkishChars(appointment.patientName)],
+            [fixTurkishChars('Hasta TC No'), patientDetails?.tc_no || '---'],
+            [fixTurkishChars('Doktor'), fixTurkishChars(`${doctorProfile.title} ${doctorProfile.firstName} ${doctorProfile.lastName}`)],
+            [fixTurkishChars('Brans'), fixTurkishChars(doctorProfile.specialization)],
+        ],
+        theme: 'striped',
+        headStyles: { fillColor: [0, 123, 255] },
+        styles: { font: "helvetica", fontSize: 10 },
+    });
+
+    let finalY = doc.lastAutoTable.finalY + 15;
+
+    // MUAYENE NOTLARI
+    doc.setFontSize(14);
+    doc.setTextColor(0, 123, 255);
+    doc.text(fixTurkishChars("MUAYENE BULGULARI VE NOTLAR:"), 20, finalY);
+
+    doc.setFontSize(11);
+    doc.setTextColor(50);
+    const rawNote = appointment.doctor_note || "Bu muayene icin doktor notu girilmemistir.";
+    const splitNote = doc.splitTextToSize(fixTurkishChars(rawNote), 170);
+    doc.text(splitNote, 20, finalY + 10);
+
+    // --- YENİ: REÇETE / İLAÇLAR BÖLÜMÜ ---
+    finalY = finalY + 20 + (splitNote.length * 5);
+    doc.setFontSize(14);
+    doc.setTextColor(0, 123, 255);
+    doc.text(fixTurkishChars("RECETE / ILACLAR:"), 20, finalY);
+
+    doc.setFontSize(11);
+    doc.setTextColor(50);
+    if (prescriptionList && prescriptionList.length > 0) {
+        prescriptionList.forEach((med, index) => {
+            doc.text(`${index + 1}. ${fixTurkishChars(med)}`, 25, finalY + 10 + (index * 7));
+        });
+    } else {
+        doc.text(fixTurkishChars("Recete yazilmamistir."), 25, finalY + 10);
+    }
+
+    // İMZA
+    const signatureY = Math.max(finalY + 40, 250); // Sayfa sonuna yakın ayarla
+    doc.setFontSize(10);
+    doc.text(fixTurkishChars("Doktor Imzasi:"), 150, signatureY);
+    doc.text("_________________", 150, signatureY + 10);
+
+    doc.save(`Rapor_Recete_${appointment.patientName.replace(/\s+/g, "_")}.pdf`);
+};
 // --- SABİT TANIMLAMALAR ---
 const DAYS_OF_WEEK = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"];
 const LEAVE_STORAGE_KEY = 'doctor_leave_dates';
@@ -93,7 +213,7 @@ export default function DoctorPage({ user, onLogout }) {
     // --- FİLTRE VE DİĞER STATE'LER ---
     const [dateFilter, setDateFilter] = useState('today');
     const [statusFilter, setStatusFilter] = useState('all');
-    const [searchTc, setSearchTc] = useState("");
+    const [searchTc, setSearchTc] = useState('');
     const [patientInfo, setPatientInfo] = useState(null);
     const [patientError, setPatientError] = useState("");
     const [selectedAppointment, setSelectedAppointment] = useState(null);
@@ -101,9 +221,75 @@ export default function DoctorPage({ user, onLogout }) {
     const [doctorNote, setDoctorNote] = useState('');
     const [quickPatientInfo, setQuickPatientInfo] = useState(null);
     const [queriedPatientAppointments, setQueriedPatientAppointments] = useState([]);
+    const [prescriptionList, setPrescriptionList] = useState([]); // Reçetedeki ilaçlar
+    const [medicineInput, setMedicineInput] = useState('');      // İlaç arama inputu
+    const [currentDrug, setCurrentDrug] = useState("");
+    const [dosage, setDosage] = useState("1x1");
+    const [timing, setTiming] = useState("Tok");
+    const [duration, setDuration] = useState("1 Hafta");
+    const [leaveTab, setLeaveTab] = useState("pending");
 
-// src/pages/DoctorPage.jsx (fetchAppointments fonksiyonunun düzeltilmiş tam hali)
+const handleAddMedicine = () => {
+    if (medicineInput.trim()) {
+        // İlacı tüm detaylarıyla (Dozaj - Zamanlama - Süre) birleştiriyoruz
+        const fullMed = `${medicineInput.trim()} (${dosage} - ${timing} - ${duration})`;
+        setPrescriptionList([...prescriptionList, fullMed]);
+        setMedicineInput("");
+    }
+};
 
+const handleAddDrug = () => {
+    if (currentDrug.trim()) {
+        setPrescriptionList([...prescriptionList, currentDrug.trim()]);
+        setCurrentDrug(""); // Inputu temizle
+    }
+};
+
+const handleSaveAll = async () => {
+    // İlaçları virgülle birleştirerek tek bir metin haline getiriyoruz
+    const prescriptionString = prescriptionList.join(", ");
+
+    try {
+        await updateAppointment(selectedAppointment.id, {
+            status: 'completed',
+            note: doctorNote, // textarea'daki not
+            prescription: prescriptionString // Yeni eklediğimiz alan
+        });
+        alert("Randevu ve Reçete başarıyla kaydedildi!");
+    } catch (error) {
+        console.error("Kaydetme hatası:", error);
+    }
+};
+
+
+const handleRemoveMedicine = (index) => {
+    setPrescriptionList(prescriptionList.filter((_, i) => i !== index));
+};
+
+// Modal kapandığında veya açıldığında reçeteyi temizlemek için
+// closeModal fonksiyonunuzun içine şunu ekleyin:
+const closeModal = () => {
+    setSelectedAppointment(null);
+    setPrescriptionList([]); // Reçeteyi sıfırla
+    setMedicineInput('');
+};
+const handleDetailsClick = async (appointment) => {
+    setSelectedAppointment(appointment);
+    setDoctorNote(appointment.doctor_note || '');
+    setPrescriptionList(appointment.prescription || []);
+    setPatientDetails(null);
+    setPatientHistory([]); // Önceki hastanın geçmişini temizle
+
+    // Geçmişi çek
+    fetchPatientHistory(appointment.tc_no);
+
+    try {
+        const response = await getPatientByTc(appointment.tc_no);
+        setPatientDetails(response.data);
+    } catch (error) {
+        console.error("Hasta detayları çekilemedi:", error);
+    }
+};
 const fetchAppointments = async () => {
     if (!doctorUserId) return;
 
@@ -114,17 +300,15 @@ const fetchAppointments = async () => {
         const now = new Date();
 
         const processedAppointments = (response.data || []).map(app => {
-            // ISO formatında tarih-saat oluştur
-            // appointment_date: "2025-12-17", time: "16:30"
+            const now = new Date();
             const appointmentDateTime = new Date(`${app.appointment_date}T${app.time}:00`);
-
-            // Randevu geçmiş mi kontrolü
             const isPast = appointmentDateTime.getTime() < now.getTime() || app.status !== 'scheduled';
 
             return {
                 ...app,
-                // Hastanın adı ve soyadı
                 patientName: `${app.patient_first_name || ''} ${app.patient_last_name || ''}`.trim() || 'Bilinmiyor',
+                // Backend'den gelen randevu tipini burada açıkça alıyoruz
+                appointmentType: app.appointmentType || "Muayene",
                 isPast
             };
         });
@@ -140,44 +324,30 @@ const fetchAppointments = async () => {
     }
 };
 
-
-    // --- useEffect: İzinleri LocalStorage'dan Çekme ve Kaydetme ---
-
-    // 1. İzinleri yükle (Sayfa ilk yüklendiğinde çalışır)
-  // src/pages/DoctorPage.jsx (İçine ekleyin)
-
-  // --- YENİ useEffect: İZİNLİ GÜNLERİ SERVER'DAN ÇEKME ---
-  useEffect(() => {
+useEffect(() => {
+      // useEffect dışına, bileşenin içine al:
       const fetchLeaveDates = async () => {
           setLeaveLoading(true);
           try {
               const response = await getDoctorLeaveDates();
-              // Varsayım: Backend'den gelen veri, 'dates' veya benzeri bir alanda [YYYY-MM-DD] dizisi içeriyor.
-              const fetchedDates = response.data.leaveDates || response.data || [];
-
-              if (Array.isArray(fetchedDates)) {
-                  const todayShort = getShortDate(new Date());
-                  // Sadece bugünden sonraki izinleri filtreleyerek yükle
-                  const futureLeaves = fetchedDates.filter(date => date >= todayShort);
-                  setLeaveDates(futureLeaves.sort());
-              } else {
-                   setLeaveDates([]);
-              }
+              const fetchedDates = response.data.leaveDates || [];
+              setLeaveDates(fetchedDates);
           } catch (error) {
-              console.error("İzinli günler çekilemedi:", error);
-              setLeaveDates([]);
+              console.error("İzinler çekilemedi:", error);
           } finally {
               setLeaveLoading(false);
           }
       };
 
-      // Yalnızca doktor ID'si varsa çalıştır
+      // useEffect içinde sadece çağır:
+      useEffect(() => {
+          if (doctorUserId) { fetchLeaveDates(); }
+      }, [doctorUserId]);
+
       if (doctorUserId) {
           fetchLeaveDates();
       }
-
-  }, [doctorUserId]); // doctorUserId değiştiğinde (veya ilk yüklemede) çalışır
-
+  }, [doctorUserId]);
 
 
 
@@ -240,47 +410,36 @@ const fetchAppointments = async () => {
     };
 
 
-    // --- İZİN YÖNETİMİ FONKSİYONLARI ---
-
-    // src/pages/DoctorPage.jsx
-
-    // --- PROFİL YÖNETİMİ FONKSİYONLARI (Sadece leave ile ilgili kısımlar) ---
-
-    // ... (Diğer profil fonksiyonları) ...
-
-    // --- İZİN EKLEME FONKSİYONU GÜNCELLENDİ ---
     const handleAddLeave = async (dateString) => {
         if (!dateString) return;
         const today = getShortDate(new Date());
         if (dateString < today) { return alert("Geçmiş bir tarih için izin ekleyemezsiniz."); }
-        if (leaveDates.includes(dateString)) { return alert("Bu tarih zaten izinli günler listenizde."); }
 
-        // Yeni izin listesi
-        const newLeaveDates = [...leaveDates, dateString].sort();
+        // Daha önce eklenmiş veya bekleyen bir talep olup olmadığını kontrol et
+        const alreadyExists = leaveDates.some(l => (l.date || l) === dateString);
+        if (alreadyExists) { return alert("Bu tarih için zaten bir talebiniz veya onaylanmış izniniz bulunuyor."); }
 
         try {
-            setLeaveLoading(true); // Yükleme durumunu başlat
-            // API çağrısı ile veritabanına kaydet
-            await updateDoctorLeaveDates(newLeaveDates);
+            setLeaveLoading(true);
 
-            // Başarılı olursa state'i güncelle
-            setLeaveDates(newLeaveDates);
-            alert(`${formatDate(dateString)} için izin başarıyla eklendi ve kaydedildi.`);
+            // DİKKAT: Artık doğrudan profile değil, 'leave_requests' tablosuna kayıt atıyoruz
+            // Backend'de bu isteği karşılayan bir route (Örn: /doctor/leave-request) olmalı
+            await api.post('/doctor/leave-request', {
+                startDate: dateString,
+                endDate: dateString // Tek günlük izinler için başlangıç ve bitiş aynı
+            });
+
+            alert(`${formatDate(dateString)} tarihi için izin talebiniz yönetici onayına gönderildi.`);
+
+            // Listeyi yenilemek için verileri tekrar çek (böylece 'Bekliyor' sekmesinde görünür)
+            if (typeof fetchLeaveDates === 'function') {
+                fetchLeaveDates();
+            }
         } catch (error) {
-              console.error("İzin eklenirken hata (FULL):", {
-                  message: error.message,
-                  status: error.response?.status,
-                  data: error.response?.data,
-                  headers: error.response?.headers,
-              });
-
-              alert(
-                  error.response?.data?.message ||
-                  error.response?.data ||
-                  "İzin eklenirken bir hata oluştu."
-              );
-          } finally {
-            setLeaveLoading(false); // Yükleme durumunu bitir
+            console.error("Talep gönderilirken hata:", error);
+            alert(error.response?.data?.message || "Talep iletilemedi.");
+        } finally {
+            setLeaveLoading(false);
         }
     };
 
@@ -309,6 +468,50 @@ const fetchAppointments = async () => {
         fetchAppointments();
     }, [doctorUserId]);
 
+const [patientHistory, setPatientHistory] = useState([]);
+
+// --- HASTA GEÇMİŞİNİ ÇEKME ---
+const fetchPatientHistory = async (tcNo) => {
+    try {
+        const response = await api.get(`/appointments/patient/tc/${tcNo}`);
+        const allApps = response.data || [];
+
+        // İstersen şu anki randevuyu hariç tutabilirsin
+        const history = allApps
+            .filter(app => app.id !== selectedAppointment?.id)
+            .sort(
+                (a, b) =>
+                    new Date(b.appointment_date) - new Date(a.appointment_date)
+            );
+
+        setPatientHistory(history);
+    } catch (error) {
+        console.error("Geçmiş randevular çekilemedi:", error);
+    }
+};
+
+// handleAddMedicine ve handleRemoveMedicine zaten görselde var varsayıyorum.
+// Asıl önemli olan kaydetme fonksiyonun:
+
+const handleSaveDoctorReport = async () => {
+    // 1. İlaç listesini virgülle ayrılmış bir metne dönüştür
+    const prescriptionString = prescriptionList.join(", ");
+
+    try {
+        // Backend'deki updateAppointment fonksiyonuna gönderiyoruz
+        await updateAppointment(app.id, {
+            status: 'completed',
+            note: doctorNote,           // textarea'daki içerik
+            prescription: prescriptionString // Eklenen ilaçların birleşmiş hali
+        });
+
+        alert("Randevu başarıyla tamamlandı ve reçete kaydedildi.");
+        // Listeyi yenilemek veya modalı kapatmak için gerekli kodlar...
+    } catch (error) {
+        console.error("Kayıt hatası:", error);
+        alert("Kaydedilemedi, lütfen tekrar deneyin.");
+    }
+};
 
     // --- HIZLI HASTA BİLGİSİ İŞLEMLERİ ---
     const handleQuickPatientInfoClick = async (tcNo, patientName) => {
@@ -347,80 +550,54 @@ const fetchAppointments = async () => {
         setQuickPatientInfo(null);
     };
 
-    // --- DETAY GÖRÜNTÜLEME VE NOT İŞLEMLERİ ---
-    const handleDetailsClick = async (appointment) => {
-        setSelectedAppointment(appointment);
-        setDoctorNote(appointment.doctor_note || '');
-        setPatientDetails(null);
 
-        try {
-            const response = await getPatientByTc(appointment.tc_no);
-            setPatientDetails(response.data);
-        } catch (error) {
-            console.error("Hasta detayları çekilemedi:", error);
-        }
-    };
 
-    const closeModal = () => {
-        setSelectedAppointment(null);
-        setPatientDetails(null);
-        setDoctorNote('');
-    };
+
+
 
    // src/pages/DoctorPage.jsx (handleSaveNote fonksiyonunun GÜNCELLENMİŞ HALİ)
 
-       const handleSaveNote = async () => {
-           // ID, Status ve Note kontrolü zorunlu alanlar
-           if (!selectedAppointment || !selectedAppointment.id || !selectedAppointment.status) {
-               alert("Hata: Randevu detayları (ID veya Durum) eksik. Lütfen sayfayı yenileyin.");
-               return;
-           }
+      const handleSaveNote = async () => {
+          if (!selectedAppointment || !selectedAppointment.id) {
+              alert("Hata: Randevu bulunamadı.");
+              return;
+          }
 
-           // 1. KATI KONTROL: Eğer not alanı boşsa, Backend'e gitmeyi deneme.
-           if (!doctorNote || doctorNote.trim() === "") {
-               alert("Kaydetmek için doktor notu alanı boş bırakılamaz.");
-               return;
-           }
+          if (!doctorNote || doctorNote.trim() === "") {
+              alert("Kaydetmek için doktor notu alanı boş bırakılamaz.");
+              return;
+          }
 
-           // 2. TOKEN VE API HAZIRLIĞI
-           initializeAuthToken();
+          initializeAuthToken();
+              const prescriptionText = prescriptionList.join(", "); // Metne çevirdik
 
-           try {
-               // Backend'e hem mevcut status'ü hem de dolu olan notu gönderiyoruz.
-               await updateAppointmentStatus(
-                   selectedAppointment.id,
-                   selectedAppointment.status, // Mevcut geçerli durumu geri gönder
-                   doctorNote.trim()           // Notu trim'lenmiş ve dolu olarak gönder
-               );
+         try {
 
-               // Başarılı güncelleme sonrası Frontend state'lerini güncelle
-               setAppointments(prev => prev.map(app =>
-                   app.id === selectedAppointment.id ? { ...app, doctor_note: doctorNote.trim() } : app
-               ));
+                 await updateAppointmentStatus(
+                     selectedAppointment.id,
+                     'completed',
+                     doctorNote.trim(),
+                     prescriptionText
+                 );
 
-               setSelectedAppointment(prev => ({ ...prev, doctor_note: doctorNote.trim() }));
+             const updatedData = {
+                         status: 'completed',
+                         doctor_note: doctorNote.trim(),
+                         prescription: prescriptionText // Array değil, String!
+                     };
 
-               alert("Doktor notu başarıyla kaydedildi.");
+              setAppointments(prev =>
+                          prev.map(app => app.id === selectedAppointment.id ? { ...app, ...updatedData } : app)
+                      );
 
-           } catch (error) {
-               console.error("Not kaydetme hatası:", error.response || error.message);
+                      setSelectedAppointment(prev => ({ ...prev, ...updatedData }));
 
-               let errorMessage = "Not kaydedilirken beklenmedik bir hata oluştu.";
+                      alert("Başarıyla veritabanına kaydedildi.");
+                  } catch (error) {
+                      console.error("Hata:", error);
+                  }
+              };
 
-               if (error.response) {
-                   const backendMessage = error.response.data?.message || JSON.stringify(error.response.data);
-                   if (error.response.status === 400) {
-                       errorMessage = `Kaydetme başarısız (400 Bad Request). Backend Mesajı: ${backendMessage || 'Gönderilen veri formatı hatalı.'}`;
-                   } else if (error.response.status === 401) {
-                       errorMessage = "Oturum süreniz doldu. Lütfen tekrar giriş yapın.";
-                   } else if (error.response.data && error.response.data.message) {
-                       errorMessage = "Kaydetme başarısız: " + error.response.data.message;
-                   }
-               }
-
-               alert(errorMessage);
-           }
-       };
 
     const handleUpdateAppointment = async (appointmentId, newStatus, currentNote = '') => {
 
@@ -441,30 +618,53 @@ const fetchAppointments = async () => {
         }
     };
 
+//hasta sorgup
+ // DoctorPage.jsx içindeki fonksiyon
+async function handleSearchTc(e) {
+    if (e && e.preventDefault) e.preventDefault();
 
-    // --- HASTA SORGULAMA ---
-    async function handleSearchTc(e) {
-        e.preventDefault();
-        setPatientError("");
+    // 1. Girdi kontrolü
+    if (!searchTc || !searchTc.trim()) {
+        setPatientError("Lütfen bir TC numarası giriniz.");
         setPatientInfo(null);
         setQueriedPatientAppointments([]);
-
-        const trimmed = searchTc.trim();
-        if (!trimmed) {
-            setPatientError("Lütfen TC Kimlik No girin.");
-            return;
-        }
-
-        try {
-            const response = await getPatientByTc(trimmed);
-            setPatientInfo(response.data);
-        } catch (error) {
-            const errorMessage = error.response?.data || "Bu TC kimlik numarasına ait hasta bulunamadı.";
-            setPatientError(errorMessage);
-        }
+        return;
     }
 
+    const trimmed = searchTc.trim();
 
+    try {
+        setPatientError(null);
+        setPatientInfo(null); // Yeni arama için eski veriyi temizle
+        setQueriedPatientAppointments([]);
+
+        // 2. Hasta temel bilgilerini getir
+        // api.js içindeki getPatientByTc kullanılıyor
+        const response = await getPatientByTc(trimmed);
+
+        if (response.data) {
+            setPatientInfo(response.data);
+
+            // 3. Hasta bulunduysa geçmiş randevularını getir
+            // api.js içindeki getPatientHistory kullanılıyor
+            const historyRes = await getPatientHistory(trimmed);
+            setQueriedPatientAppointments(historyRes.data || []);
+        }
+
+    } catch (error) {
+        console.error("Veri çekme hatası:", error);
+
+        // Backend'den dönen 404 hatasını yakala
+        if (error.response && error.response.status === 404) {
+            setPatientError("Sistemde bu TC numarasına kayıtlı bir hasta bulunamadı.");
+        } else {
+            setPatientError("Bilgiler çekilemedi. Lütfen bağlantınızı veya oturumunuzu kontrol edin.");
+        }
+
+        setPatientInfo(null);
+        setQueriedPatientAppointments([]);
+    }
+}
     // --- YARDIMCI GÖRÜNÜM FONKSİYONLARI ---
 
     function getStatusText(status) {
@@ -537,11 +737,56 @@ const fetchAppointments = async () => {
     };
 
 
-    // --- RENDER HIZLI HASTA BİLGİ MODALI ---
-    function renderQuickPatientInfoModal() {
-        if (!quickPatientInfo) return null;
 
-        const { name, loading, data, error } = quickPatientInfo;
+    // --- İSTATİSTİK HESAPLAMALARI (GÜVENLİ VE DOĞRU YER) ---
+        const getStats = () => {
+            if (!appointments || !Array.isArray(appointments)) {
+                return { todayAppointments: 0, weeklyTotal: 0, completedTotal: 0 };
+            }
+            const todayStr = getShortDate(new Date());
+            const weekStart = getStartOfWeek(new Date());
+            const weekEnd = addDays(weekStart, 6);
+
+            const todayAppointments = appointments.filter(a =>
+                getShortDate(a.appointment_date) === todayStr && a.status === 'scheduled'
+            ).length;
+
+            const weeklyTotal = appointments.filter(a => {
+                const d = new Date(a.appointment_date);
+                return d >= weekStart && d <= weekEnd;
+            }).length;
+
+            const completedTotal = appointments.filter(a => a.status === 'completed').length;
+
+            return { todayAppointments, weeklyTotal, completedTotal };
+        };
+
+        // Değişkeni burada tanımlıyoruz ki aşağıdaki return bloğu buna erişebilsin
+        const stats = getStats();
+
+    // --- RENDER HIZLI HASTA BİLGİ MODALI ---
+        function renderQuickPatientInfoModal() {
+            if (!quickPatientInfo) return null;
+
+            const { name, loading, data, error } = quickPatientInfo;
+
+const handleDetailsClick = async (appointment) => {
+                        setSelectedAppointment(appointment);
+                        setDoctorNote(appointment.doctor_note || '');
+                        setPrescriptionList(appointment.prescription || []);
+                        setPatientDetails(null);
+                        setPatientHistory([]); // Önceki hastanın geçmişini temizle
+
+                        // Geçmişi çek
+                        fetchPatientHistory(appointment.tc_no);
+
+                        try {
+                            const response = await getPatientByTc(appointment.tc_no);
+                            setPatientDetails(response.data);
+                        } catch (error) {
+                            console.error("Hasta detayları çekilemedi:", error);
+                        }
+                    };
 
         return (
             <div className="modal-backdrop">
@@ -582,64 +827,178 @@ const fetchAppointments = async () => {
             </div>
         );
     }
+function renderDoctorActionArea() {
+    if (!selectedAppointment) return null;
 
+    const isResultAppointment = selectedAppointment.appointmentType === "Sonuç";
+
+    return (
+        <div className="doctor-action-card">
+            {/* HER İKİ DURUMDA DA GÖRÜNEN: Klinik Not Girişi */}
+            <div className="form-field">
+                <label>Klinik Notlar / Bulgular</label>
+                <textarea
+                    className="form-input"
+                    value={doctorNote}
+                    onChange={(e) => setDoctorNote(e.target.value)}
+                    placeholder="Hastanın şikayetleri ve fiziksel muayene bulguları..."
+                />
+            </div>
+
+            {/* --- DURUM A: MUAYENE RANDEVUSU --- */}
+            {!isResultAppointment ? (
+                <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #f2c94c', borderRadius: '10px' }}>
+                    <h4 style={{ color: '#f39c12' }}>🩺 Muayene İstek Paneli</h4>
+                    <p style={{ fontSize: '0.85rem', color: '#666' }}>Lütfen hastadan istediğiniz tetkikleri seçin:</p>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
+                        <label><input type="checkbox" /> Kan Sayımı (Hemogram)</label>
+                        <label><input type="checkbox" /> Biyokimya Paneli</label>
+                        <label><input type="checkbox" /> Akciğer Grafisi (Röntgen)</label>
+                        <label><input type="checkbox" /> Lomber MR</label>
+                    </div>
+                </div>
+            ) : (
+                /* --- DURUM B: SONUÇ RANDEVUSU --- */
+                <div style={{ marginTop: '20px' }}>
+                    <h4 style={{ color: '#27ae60' }}>💊 Reçete ve Rapor Paneli</h4>
+
+                    {/* Reçete Girişi */}
+                    <div className="form-field">
+                        <label>Reçete Yaz (İlaçlar ve Kullanım)</label>
+                        <textarea
+                            className="form-input"
+                            value={prescription}
+                            onChange={(e) => setPrescription(e.target.value)}
+                            placeholder="Örn: Parol 500mg 2x1, Tok karnına..."
+                        />
+                    </div>
+
+                    {/* Radyolojik Rapor Girişi (Daha önce yazdığımız modül) */}
+                    {renderRadiologyReporting()}
+                </div>
+            )}
+
+            <button className="appointment-submit" style={{ marginTop: '20px' }}>
+                {isResultAppointment ? "Süreci Tamamla ve Kaydet" : "Tetkikleri İste ve Notu Kaydet"}
+            </button>
+        </div>
+    );
+}
     // --- RENDER APPOINTMENT DETAY MODALI ---
     function renderAppointmentDetailModal() {
         if (!selectedAppointment) return null;
 
         const app = selectedAppointment;
 
+        const isResultAppointment =
+            (app.appointmentType && app.appointmentType.toString().toLowerCase() === "sonuç") ||
+            (app.reason && app.reason.toLowerCase().includes("sonuç"));
+
+        console.log("Seçilen Randevu Tipi (İşlenmiş):", isResultAppointment ? "Sonuç" : "Muayene");
         return (
             <div className="modal-backdrop">
-                <div className="modal appointment-detail-modal">
-                    <h3>{app.patientName} Randevu Detayları</h3>
+                <div className="modal appointment-detail-modal" style={{ maxWidth: '800px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                        <h3 style={{ margin: 0 }}>{app.patientName} Randevu Detayları</h3>
+                        <span style={{
+                            padding: '4px 12px',
+                            borderRadius: '20px',
+                            fontSize: '0.85rem',
+                            fontWeight: 'bold',
+                            backgroundColor: isResultAppointment ? '#e8f4fd' : '#fff9db',
+                            color: isResultAppointment ? '#2980b9' : '#f39c12',
+                            border: `1px solid ${isResultAppointment ? '#3498db' : '#f2c94c'}`
+                        }}>
+                            {isResultAppointment ? "📋 SONUÇ RANDEVUSU" : "🩺 MUAYENE RANDEVUSU"}
+                        </span>
+                    </div>
 
                     {patientDetails ? (
-                        <div className="detail-grid">
-                            {/* Randevu Bilgileri */}
-                            <div className="detail-section">
-                                <h4>📅 Randevu Bilgileri</h4>
+                        <div className="detail-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                            <div className="detail-section" style={{ background: '#f8f9fa', padding: '15px', borderRadius: '8px' }}>
+                                <h4 style={{ marginTop: 0 }}>📅 Randevu Bilgileri</h4>
                                 <p><strong>Tarih:</strong> {new Date(app.appointment_date).toLocaleDateString()}</p>
                                 <p><strong>Saat:</strong> {app.time}</p>
                                 <p><strong>Şikayet:</strong> {app.reason}</p>
-                                <p><strong>Durum:</strong> {getStatusText(app.status)}</p>
                             </div>
-
-                            {/* Hasta Bilgileri */}
-                            <div className="detail-section">
-                                <h4>👤 Hasta Profili</h4>
+                            <div className="detail-section" style={{ background: '#f8f9fa', padding: '15px', borderRadius: '8px' }}>
+                                <h4 style={{ marginTop: 0 }}>👤 Hasta Profili</h4>
                                 <p><strong>TC No:</strong> {patientDetails.tc_no || 'Bilinmiyor'}</p>
                                 <p><strong>Doğum Tarihi:</strong> {formatDate(patientDetails.date_of_birth) || 'Bilinmiyor'}</p>
                                 <p><strong>Cinsiyet:</strong> {patientDetails.gender || 'Bilinmiyor'}</p>
                             </div>
                         </div>
                     ) : (
-                        <p style={{textAlign: 'center', margin: '20px 0'}}>Hasta detayları yükleniyor veya TC numarasıyla profili çekilemedi.</p>
+                        <p style={{ textAlign: 'center', margin: '20px 0' }}>Hasta detayları yükleniyor...</p>
                     )}
 
-                    <div className="form-field full-width" style={{marginTop: '20px'}}>
-                        <label>✍️ Doktor Notu (Muayene sırasında veya sonrasında kaydedin)</label>
+                    {/* --- ORTAK ALAN: DOKTOR NOTU --- */}
+                    <div className="form-field full-width" style={{ marginTop: '20px' }}>
+                        <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>✍️ Klinik Bulgular ve Muayene Notu</label>
                         <textarea
                             className="form-input"
-                            rows="5"
+                            rows="4"
                             value={doctorNote}
                             onChange={(e) => setDoctorNote(e.target.value)}
-                            placeholder="Muayene bulgularınızı, tedavi planınızı veya önemli gözlemlerinizi buraya yazın."
+                            placeholder="Hastanın şikayetleri ve fiziksel muayene bulgularını giriniz..."
                         />
                     </div>
 
-                    <div className="modal-actions">
+                    {/* --- KOŞULLU ALANLAR --- */}
+                    {!isResultAppointment ? (
+                        /* DURUM A: MUAYENE - TETKİK İSTEMİ */
+                        <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#fffdf5', border: '1px dashed #f2c94c', borderRadius: '8px' }}>
+                            <h4 style={{ color: '#856404', marginTop: 0 }}>🔬 Tetkik İstemi (Laboratuvar & Radyoloji)</h4>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                <label style={{ cursor: 'pointer' }}><input type="checkbox" onChange={(e) => e.target.checked && setDoctorNote(prev => prev + "\n- Tam Kan Sayımı (Hemogram) istendi.")} /> Tam Kan Sayımı</label>
+                                <label style={{ cursor: 'pointer' }}><input type="checkbox" onChange={(e) => e.target.checked && setDoctorNote(prev => prev + "\n- Biyokimya Paneli istendi.")} /> Biyokimya</label>
+                                <label style={{ cursor: 'pointer' }}><input type="checkbox" onChange={(e) => e.target.checked && setDoctorNote(prev => prev + "\n- Akciğer Grafisi (Röntgen) istendi.")} /> Röntgen</label>
+                                <label style={{ cursor: 'pointer' }}><input type="checkbox" onChange={(e) => e.target.checked && setDoctorNote(prev => prev + "\n- Bölgesel MR Görüntüleme istendi.")} /> MR / BT</label>
+                            </div>
+                        </div>
+                    ) : (
+                        /* DURUM B: SONUÇ - REÇETE VE RADYOLOJİ RAPORU */
+                        <div style={{ marginTop: '20px' }}>
+                            <div style={{ padding: '15px', backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', marginBottom: '20px' }}>
+                                <h4 style={{ color: '#0369a1', marginTop: 0 }}>💊 Reçete Düzenleme</h4>
+                                <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                                    <input
+                                        type="text"
+                                        className="form-input"
+                                        style={{ flex: 2 }}
+                                        placeholder="İlaç adı..."
+                                        value={medicineInput}
+                                        onChange={(e) => setMedicineInput(e.target.value)}
+                                    />
+                                    <button type="button" onClick={handleAddMedicine} className="action-button action-success">Ekle</button>
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                    {prescriptionList.map((med, index) => (
+                                        <span key={index} style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '4px 10px', borderRadius: '15px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            {med} <button onClick={() => handleRemoveMedicine(index)} style={{ border: 'none', background: 'none', color: '#ef4444', cursor: 'pointer' }}>×</button>
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Radyoloji Rapor Modülü */}
+                            {renderRadiologyReporting()}
+                        </div>
+                    )}
+
+                    <div className="modal-actions" style={{ marginTop: '25px', borderTop: '1px solid #eee', paddingTop: '15px' }}>
+                        <button
+                            onClick={() => generatePDFReport(app, patientDetails, profileData, prescriptionList)}
+                            className="modal-button"
+                            style={{ backgroundColor: '#28a745', color: 'white' }}
+                        >
+                            📄 Rapor & Reçete PDF
+                        </button>
                         <button onClick={handleSaveNote} className="modal-button modal-save">
-                            Notu Kaydet
+                            {isResultAppointment ? "Sonucu Kaydet" : "Muayeneyi Kaydet"}
                         </button>
-                        {app.status === 'scheduled' && (
-                            <button onClick={() => handleUpdateAppointment(app.id, 'completed')} className="modal-button modal-complete">
-                                Tamamla
-                            </button>
-                        )}
-                        <button onClick={closeModal} className="modal-button modal-cancel">
-                            Kapat
-                        </button>
+                        <button onClick={closeModal} className="modal-button modal-cancel">Kapat</button>
                     </div>
                 </div>
             </div>
@@ -648,100 +1007,135 @@ const fetchAppointments = async () => {
 
 
     // --- YENİ BİLEŞEN: İZİN YÖNETİMİ ---
-    function renderLeaveManagement() {
-            const sortedLeaveDates = [...leaveDates].sort();
+   function renderLeaveManagement() {
+       // HATA: leaveRequests.filter(...) yazıyordu.
+       // DÜZELTME: Mevcut state'in olan leaveDates kullanılmalı.
+       const safeLeaves = Array.isArray(leaveDates) ? leaveDates : [];
 
-            return (
-                <>
-                    <h1 style={{ fontSize: "24px", marginBottom: "16px" }}>
-                        İzin Yönetimi
-                    </h1>
-                    <div className="card">
-                        <h3>İzin Ekle</h3>
+       const filteredLeaves = safeLeaves.filter(req => {
+           // req bazen sadece string (tarih) bazen obje olabilir, ikisini de kontrol et
+           const status = req.status || 'approved'; // Eski sarı rozetler 'approved' sayılır
+           return status.toLowerCase() === leaveTab.toLowerCase();
+       });
 
-                        {/* HİZALAMA DÜZELTİLDİ: align-items: flex-end ve flex:1 kaldırıldı */}
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '30px' }}>
+       return (
+           <div style={{ maxWidth: '850px', margin: '0 auto', padding: '20px', animation: 'fadeIn 0.5s ease' }}>
+               {/* ÜST BAŞLIK */}
+               <div style={{ marginBottom: '30px', borderBottom: '2px solid #f0f2f5', paddingBottom: '15px' }}>
+                   <h1 style={{ fontSize: "26px", fontWeight: '800', color: '#2c3e50', margin: 0 }}>
+                       İzin ve Takvim Yönetimi
+                   </h1>
+                   <p style={{ margin: '5px 0 0', color: '#7f8c8d', fontSize: '1rem' }}>
+                       Çalışma takviminizi planlayın ve izin taleplerinizi takip edin.
+                   </p>
+               </div>
 
-                            {/* Tarih Seçici - Gerekli max-width korundu */}
-                            <div className="form-group" style={{ maxWidth: '300px' }}>
-                                <label style={{ display: 'block', marginBottom: '7px', fontWeight: 600 }}>İzin Tarihi Seçin</label>
-                                <input
-                                    type="date"
-                                    className="form-input"
-                                    value={leaveDateInput}
-                                    onChange={(e) => setLeaveDateInput(e.target.value)}
-                                    min={getShortDate(new Date())} // Bugün ve sonrası seçilebilir
-                                />
-                            </div>
+               {/* İZİN EKLEME FORMU (Hızlı İşlem) */}
+               <div className="card" style={{ padding: '25px', borderRadius: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.05)', marginBottom: '30px', border: '1px solid #f0f2f5' }}>
+                   <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '1.1rem', color: '#34495e' }}>➕ Yeni İzin Talebi Oluştur</h3>
+                   <div style={{ display: 'flex', gap: '15px', alignItems: 'flex-end' }}>
+                       <div style={{ flex: 1 }}>
+                           <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#555', fontSize: '0.85rem' }}>İzin Tarihi</label>
+                           <input
+                               type="date"
+                               className="form-input"
+                               style={{ width: '100%', borderRadius: '12px' }}
+                               value={leaveDateInput}
+                               onChange={(e) => setLeaveDateInput(e.target.value)}
+                               min={getShortDate(new Date())}
+                           />
+                       </div>
+                       <button
+                           onClick={() => { if(leaveDateInput) handleAddLeave(leaveDateInput); setLeaveDateInput(''); }}
+                           className="appointment-submit"
+                           style={{ height: '48px', marginTop: 0, padding: '0 30px', borderRadius: '12px', backgroundColor: '#f39c12' }}
+                           disabled={!leaveDateInput}
+                       >
+                           Talebi Gönder
+                       </button>
+                   </div>
+               </div>
 
-                            {/* Ekle Butonu - height: 38px tam hizalama için korunuyor */}
-                            <button
-                                onClick={() => {
-                                    if (leaveDateInput) {
-                                        handleAddLeave(leaveDateInput);
-                                        setLeaveDateInput('');
-                                    }
-                                }}
-                                style={{
-                                    height: '35px',
-                                    whiteSpace: 'nowrap',
-                                    backgroundColor: '#ffc107', // Sarı renk
-                                    color: '#333',
-                                    border: 'none',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer',
-                                    padding: '8px 15px',
-                                    fontWeight: 600
-                                }}
-                                disabled={!leaveDateInput || leaveDates.includes(leaveDateInput) || leaveDateInput < getShortDate(new Date())}
-                            >
-                                İzin Ekle
-                            </button>
-                        </div>
+               {/* SEKMELER (Tabs) */}
+               <div style={{ display: 'flex', gap: '10px', marginBottom: '25px', background: '#f8f9fa', padding: '10px', borderRadius: '15px', width: 'fit-content' }}>
+                   {[
+                       { id: 'pending', label: '⏳ Bekleyenler', color: '#f39c12' },
+                       { id: 'approved', label: '✅ Onaylananlar', color: '#27ae60' },
+                       { id: 'rejected', label: '❌ Reddedilenler', color: '#e74c3c' }
+                   ].map(tab => (
+                       <button
+                           key={tab.id}
+                           onClick={() => setLeaveTab(tab.id)}
+                           style={{
+                               padding: '12px 24px', borderRadius: '10px', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.9rem', transition: 'all 0.3s ease',
+                               backgroundColor: leaveTab === tab.id ? tab.color : 'transparent',
+                               color: leaveTab === tab.id ? 'white' : '#7f8c8d'
+                           }}
+                       >
+                           {tab.label}
+                       </button>
+                   ))}
+               </div>
 
-                    <h3>Kayıtlı İzinli Günler ({leaveDates.length})</h3>
-                    {leaveDates.length === 0 ? (
-                        <p style={{ color: '#555' }}>Kayıtlı izinli gününüz bulunmamaktadır.</p>
-                    ) : (
-                        <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #eee', padding: '10px', borderRadius: '4px' }}>
-                            {sortedLeaveDates.map(dateKey => (
-                                <div
-                                    key={dateKey}
-                                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #eee' }}
-                                >
-                                    <span style={{ fontWeight: 600 }}>
-                                        {formatDate(dateKey)}
-                                        (<span style={{ color: '#555', fontWeight: 400 }}>
-                                            {new Date(dateKey).toLocaleDateString('tr-TR', { weekday: 'long' })}
-                                        </span>)
-                                    </span>
-                                    <button
-                                        className="action-button action-danger"
-                                        onClick={() => handleRemoveLeave(dateKey)}
-                                        style={{ padding: '4px 8px', fontSize: '13px' }}
-                                    >
-                                        Kaldır
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </>
-        );
-    }
+               {/* İZİN LİSTESİ (Kart Tasarımı) */}
+               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
+                   {filteredLeaves.length > 0 ? (
+                       filteredLeaves.map((leave, index) => (
+                           <div key={index} style={{
+                               background: 'white', padding: '20px', borderRadius: '20px', border: '1px solid #f0f2f5',
+                               borderLeft: `6px solid ${leaveTab === 'approved' ? '#27ae60' : leaveTab === 'rejected' ? '#e74c3c' : '#f39c12'}`,
+                               boxShadow: '0 8px 20px rgba(0,0,0,0.03)', position: 'relative'
+                           }}>
+                               <div style={{ fontWeight: 'bold', fontSize: '1.2rem', color: '#2c3e50', marginBottom: '5px' }}>
+                                   {formatDate(leave.date || leave)}
+                               </div>
+                               <div style={{ color: '#95a5a6', fontSize: '0.85rem', marginBottom: '15px', textTransform: 'capitalize' }}>
+                                   {new Date(leave.date || leave).toLocaleDateString('tr-TR', { weekday: 'long' })}
+                               </div>
+
+                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                   <span style={{
+                                       fontSize: '0.75rem', fontWeight: '800', padding: '5px 12px', borderRadius: '12px',
+                                       backgroundColor: leaveTab === 'approved' ? '#eafaf1' : leaveTab === 'rejected' ? '#fdf2f2' : '#fff9eb',
+                                       color: leaveTab === 'approved' ? '#27ae60' : leaveTab === 'rejected' ? '#e74c3c' : '#f39c12'
+                                   }}>
+                                       {leaveTab === 'approved' ? 'ONAYLANDI' : leaveTab === 'rejected' ? 'REDDEDİLDİ' : 'BEKLİYOR'}
+                                   </span>
+
+                                   {leaveTab === 'pending' && (
+                                       <button
+                                           onClick={() => handleRemoveLeave(leave.date || leave)}
+                                           style={{ background: 'none', border: 'none', color: '#95a5a6', cursor: 'pointer', fontSize: '0.8rem', textDecoration: 'underline' }}
+                                       >
+                                           İptal Et
+                                       </button>
+                                   )}
+                               </div>
+                           </div>
+                       ))
+                   ) : (
+                       <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px', background: '#f8fafc', borderRadius: '20px', border: '2px dashed #e2e8f0' }}>
+                           <div style={{ fontSize: '3rem', marginBottom: '15px' }}>🏜️</div>
+                           <p style={{ color: '#94a3b8', fontWeight: '500' }}>Bu kategoride herhangi bir kayıt bulunmuyor.</p>
+                       </div>
+                   )}
+               </div>
+           </div>
+       );
+   }
 
     // ---------------------------------------------------------------------
     // --- PROFİL YÖNETİMİ BİLEŞENLERİ (Görüntüleme/Düzenleme Geçişi) ---
     // ---------------------------------------------------------------------
 // --- PROFİL BİLGİLERİNİ BACKEND'DEN ÇEK (ZORUNLU) ---
+// DoctorPage.jsx içindeki useEffect
+// DoctorPage.jsx içindeki useEffect
 useEffect(() => {
     async function fetchDoctorProfile() {
         try {
             setProfileLoading(true);
-
             const response = await getDoctorProfile();
-            const data = response.data;
+            const data = response.data; // Konsoldaki o obje burası
 
             setProfileData(prev => ({
                 ...prev,
@@ -750,163 +1144,260 @@ useEffect(() => {
                 email: data.email || '',
                 specialization: data.specialization || 'Belirtilmedi',
                 title: data.title || 'Dr.',
+                education: data.education || [],
                 newPassword: '',
                 confirmNewPassword: ''
             }));
 
-
         } catch (error) {
             console.error("Doktor profili alınamadı:", error);
-            setProfileMessage({
-                type: 'error',
-                text: 'Profil bilgileri yüklenemedi.'
-            });
         } finally {
             setProfileLoading(false);
         }
     }
-
     fetchDoctorProfile();
 }, []);
+function renderRadiologyReporting() {
+    return (
+        <div className="card" style={{ animation: 'fadeIn 0.5s ease-in' }}>
+            <h2 style={{ color: '#2c3e50', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '1.6rem' }}>📝</span> Radyoloji Rapor Girişi
+            </h2>
 
-    // --- 1. RENDER PROFİL GÖRÜNTÜLEME MODU (DÜZELTİLDİ) ---
-    function renderProfileView() {
-        return (
-            <>
-                <h1 style={{ fontSize: "24px", marginBottom: "16px" }}>
-                    👤 Profil Bilgileri
-                </h1>
-                <div className="card">
-                    <div className="detail-grid" style={{ columnGap: '20px', gridTemplateColumns: '1fr 1fr', rowGap: '15px' }}>
-
-                        {/* Ad Soyad - DÜZELTİLDİ */}
-                        <div className="profile-label">Ad Soyad</div>
-                        <div className="profile-value" style={{ fontWeight: 'bold' }}>{profileData.firstName} {profileData.lastName}</div>
-
-                        {/* E-posta */}
-                        <div className="profile-label">E-posta</div>
-                        <div className="profile-value">{profileData.email}</div>
-
-                        {/* Unvan */}
-                        <div className="profile-label">Unvan</div>
-                        <div className="profile-value">{profileData.title}</div>
-
-                        {/* Branş */}
-                        <div className="profile-label">Branş</div>
-                        <div className="profile-value">{profileData.specialization}</div>
+            <form style={{ display: 'grid', gap: '20px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                    <div className="form-field">
+                        <label>Tetkik Türü</label>
+                        <select className="form-input">
+                            <option value="MR">MR (Emar)</option>
+                            <option value="X-RAY">Röntgen (X-Ray)</option>
+                            <option value="CT">Tomografi (BT)</option>
+                            <option value="USG">Ultrason (USG)</option>
+                        </select>
                     </div>
-
-                    <button
-                        className="action-button action-primary"
-                        // Düzenleme moduna geçiş yapar ve mesajları temizler
-                        onClick={() => { setIsEditingProfile(true); setProfileMessage({ type: '', text: '' }); }}
-                        style={{ marginTop: '25px',
-                            padding: '10px 20px',
-                             backgroundColor: '#ffc107',
-                                 color: '#333',
-                                 border: 'none',
-                             fontWeight: 'bold'}}
-                    >
-                        Bilgileri Güncelle
-                    </button>
-
-                    {profileMessage.text && profileMessage.type === 'success' && (
-                        <p style={{ color: 'green', marginTop: '15px', fontWeight: 600 }}>
-                            {profileMessage.text}
-                        </p>
-                    )}
+                    <div className="form-field">
+                        <label>Tetkik Bölgesi</label>
+                        <input type="text" className="form-input" placeholder="Örn: Lomber Spinal, Akciğer PA vb." />
+                    </div>
                 </div>
-            </>
-        );
-    }
 
+                <div className="form-field">
+                    <label>Klinik Bulgular ve Rapor Detayı</label>
+                    <textarea
+                        className="form-input"
+                        rows="6"
+                        placeholder="Radyolojik bulguları detaylıca buraya yazınız..."
+                        style={{ resize: 'vertical' }}
+                    ></textarea>
+                </div>
 
-    // --- 2. RENDER PROFİL DÜZENLEME MODU (YENİ EKLENDİ) ---
+                <div className="form-field">
+                    <label>Sonuç / Kanı</label>
+                    <input type="text" className="form-input" placeholder="Özet sonuç cümlesini giriniz..." />
+                </div>
+
+                <div style={{
+                    padding: '15px',
+                    backgroundColor: '#fffcf0',
+                    border: '1px dashed #f2c94c',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px'
+                }}>
+                    <span style={{ fontSize: '1.2rem' }}>🖼️</span>
+                    <div style={{ fontSize: '0.85rem', color: '#856404' }}>
+                        <strong>Görüntü Ekleme:</strong> Görüntü dosyaları (DICOM/JPG) PACS sisteminden otomatik olarak eşleşecektir.
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                    <button type="button" className="appointment-submit" style={{ flex: 2, backgroundColor: '#2ecc71', color: '#fff' }}>
+                        ✅ Raporu Onayla ve Yayınla
+                    </button>
+                    <button type="button" className="btn-secondary" style={{ flex: 1 }}>
+                        Taslak Olarak Kaydet
+                    </button>
+                </div>
+            </form>
+        </div>
+    );
+}
+    // --- 1. RENDER PROFİL GÖRÜNTÜLEME MODU (DÜZELTİLDİ) ---
+   function renderProfileView() {
+       // Kurumsal Sarı Renk Paleti
+       const primaryYellow = '#f1c40f'; // Daha canlı bir sarı
+       const hoverYellow = '#f39c12';
+
+       return (
+           <div style={{ maxWidth: '850px', margin: '0 auto', animation: 'fadeIn 0.5s ease' }}>
+               {/* ÜST BAŞLIK ALANI */}
+               <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '30px' }}>
+                   <div style={{
+                       width: '70px', height: '70px', backgroundColor: primaryYellow, borderRadius: '50%',
+                       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem',
+                       boxShadow: `0 4px 15px rgba(241, 196, 15, 0.3)`
+                   }}>👤</div>
+                   <div>
+                       <h1 style={{ margin: 0, fontSize: '26px', fontWeight: '800', color: '#2c3e50' }}>Profil Bilgileri</h1>
+                       <p style={{ margin: 0, color: '#7f8c8d' }}>Kurumsal kimlik ve hesap detaylarınız</p>
+                   </div>
+               </div>
+
+               {/* ANA PROFİL KARTI */}
+               <div className="card" style={{
+                   padding: '35px', borderRadius: '20px', border: '1px solid #f0f2f5',
+                   boxShadow: '0 10px 30px rgba(0,0,0,0.05)', position: 'relative', marginBottom: '25px'
+               }}>
+                   {/* Sarı Vurgu Çizgisi */}
+                   <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '6px', backgroundColor: primaryYellow }}></div>
+
+                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px' }}>
+                       <div>
+                           <label style={pLabelStyle}>AD SOYAD</label>
+                           <div style={pValueStyle}>{profileData.firstName} {profileData.lastName}</div>
+                       </div>
+                       <div>
+                           <label style={pLabelStyle}>E-POSTA ADRESİ 📧</label>
+                           <div style={pValueStyle}>{profileData.email}</div>
+                       </div>
+                       <div>
+                           <label style={pLabelStyle}>AKADEMİK UNVAN 🎓</label>
+                           <div style={pValueStyle}> {profileData.title}</div>
+                       </div>
+                       <div>
+                           <label style={pLabelStyle}>UZMANLIK ALANI</label>
+                           <div style={pValueStyle}> {profileData.specialization}</div>
+                       </div>
+                   </div>
+
+                   <button
+                       onClick={() => { setIsEditingProfile(true); setProfileMessage({ type: '', text: '' }); }}
+                       style={{
+                           ...pButtonStyle,
+                           backgroundColor: primaryYellow,
+                           boxShadow: `0 4px 15px rgba(241, 196, 15, 0.3)`,
+                           color: '#2c3e50' // Koyu metin sarı üzerinde daha iyi okunur
+                       }}
+                   >
+                       ⚙️ Bilgileri Güncelle
+                   </button>
+               </div>
+
+               {/* YENİ: EĞİTİM BİLGİLERİ KARTU */}
+              {/* DoctorPage.jsx içindeki Eğitim Kartı Bölümü */}
+           {/* DoctorPage.jsx içindeki "EĞİTİM BİLGİLERİ KARTU" bölümünü bu kodla değiştirin */}
+           <div className="card" style={{ padding: '30px', borderRadius: '20px', border: '1px solid #f0f2f5', boxShadow: '0 10px 30px rgba(0,0,0,0.05)', position: 'relative' }}>
+               <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '6px', backgroundColor: '#34495e' }}></div>
+               <h3 style={{ marginTop: 0, marginBottom: '20px', color: '#2c3e50', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                   📚 Eğitim ve Akademik Geçmiş
+               </h3>
+              {/* DoctorPage.jsx içindeki eğitim bölümünü bu kodla değiştir */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                  {profileData.education &&
+                   (Array.isArray(profileData.education) ? profileData.education.length > 0 : profileData.education.trim() !== "") ? (
+
+                      // Veri diziyse direkt kullan, string ise böl
+                      (Array.isArray(profileData.education)
+                          ? profileData.education
+                          : profileData.education.split('\n')
+                      )
+                      .filter(line => line && line.toString().trim() !== "")
+                      .map((edu, index) => (
+                          <div key={index} style={{ display: 'flex', alignItems: 'flex-start', gap: '15px' }}>
+                              <div style={{ width: '10px', height: '10px', backgroundColor: '#f1c40f', borderRadius: '50%', marginTop: '6px' }}></div>
+                              <div style={{ fontWeight: '600', color: '#2c3e50' }}>{edu}</div>
+                          </div>
+                      ))
+                  ) : (
+                      <p style={{ color: '#95a5a6', fontStyle: 'italic' }}>Henüz akademik geçmiş bilgisi girilmemiştir.</p>
+                  )}
+              </div>
+           </div>
+                  </div>
+       );
+   }
+
     function renderProfileEdit() {
         return (
-            <>
-                <h1 style={{ fontSize: "24px", marginBottom: "16px" }}>
-                    ✍️ Hesap Ayarları Düzenle
+            <div style={{ maxWidth: '800px', margin: '0 auto', animation: 'fadeIn 0.5s ease' }}>
+                <h1 style={{ fontSize: "26px", fontWeight: '800', marginBottom: "25px", color: '#2c3e50' }}>
+                    ✍️ Hesap Ayarlarını Düzenle
                 </h1>
-                <div className="card">
-                    <h3>Kişisel Bilgileri Düzenle</h3>
 
-                    {profileMessage.text && (
-                        <p style={{ color: profileMessage.type === 'error' ? 'red' : 'green', marginBottom: '15px', fontWeight: 600 }}>
-                            {profileMessage.text}
-                        </p>
-                    )}
-
+                <div className="card" style={{ padding: '35px', borderRadius: '20px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)' }}>
                     <form onSubmit={handleProfileSubmit}>
-                        <div className="detail-grid" style={{ columnGap: '20px', gridTemplateColumns: '1fr 1fr' }}>
+                        <h3 style={{ marginTop: 0, marginBottom: '25px', color: '#34495e', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+                            Kişisel Bilgiler
+                        </h3>
 
-                            {/* Ad ve Soyad */}
-                            <div className="form-group">
-                                <label>Ad</label>
-                                <input type="text" name="firstName" className="form-input" value={profileData.firstName} onChange={handleProfileChange} required />
+                        {profileMessage.text && (
+                            <div style={{
+                                padding: '12px', borderRadius: '8px', marginBottom: '20px',
+                                backgroundColor: profileMessage.type === 'error' ? '#fff5f5' : '#f0fff4',
+                                color: profileMessage.type === 'error' ? '#e74c3c' : '#27ae60',
+                                border: `1px solid ${profileMessage.type === 'error' ? '#feb2b2' : '#9ae6b4'}`
+                            }}>
+                                {profileMessage.type === 'error' ? '❌ ' : '✅ '} {profileMessage.text}
                             </div>
-                            <div className="form-group">
-                                <label>Soyad</label>
-                                <input type="text" name="lastName" className="form-input" value={profileData.lastName} onChange={handleProfileChange} required />
-                            </div>
+                        )}
 
-                            {/* E-posta ve Unvan (Title) */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                             <div className="form-group">
-                                <label>E-posta</label>
-                                <input type="email" name="email" className="form-input" value={profileData.email} onChange={handleProfileChange} required />
+                                <label style={fLabelStyle}>Ad</label>
+                                <input type="text" name="firstName" style={fInputStyle} value={profileData.firstName} onChange={handleProfileChange} required />
                             </div>
                             <div className="form-group">
-                                <label>Unvan</label>
-                                <input type="text" className="form-input" value={profileData.title} disabled style={{ backgroundColor: '#f0f0f0' }} />
+                                <label style={fLabelStyle}>Soyad</label>
+                                <input type="text" name="lastName" style={fInputStyle} value={profileData.lastName} onChange={handleProfileChange} required />
                             </div>
-
-                            {/* Branş (Sadece gösterim amaçlı) */}
-                            <div className="form-group full-width" style={{ gridColumn: 'span 2' }}>
-                                <label>Branş (Değiştirilemez)</label>
-                                <input type="text" className="form-input" value={profileData.specialization} disabled style={{ backgroundColor: '#f0f0f0' }} />
+                            <div className="form-group">
+                                <label style={fLabelStyle}>E-posta</label>
+                                <input type="email" name="email" style={fInputStyle} value={profileData.email} onChange={handleProfileChange} required />
+                            </div>
+                            <div className="form-group">
+                                <label style={fLabelStyle}>Unvan (Sabit)</label>
+                                <input type="text" style={{...fInputStyle, backgroundColor: '#f8f9fa', cursor: 'not-allowed'}} value={profileData.title} disabled />
                             </div>
                         </div>
 
-                        <h3 style={{ marginTop: '30px' }}>Şifre Güncelleme (Opsiyonel)</h3>
-                        <div className="detail-grid" style={{ columnGap: '20px', gridTemplateColumns: '1fr 1fr' }}>
+                        <h3 style={{ marginTop: '40px', marginBottom: '20px', color: '#34495e', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+                            Güvenlik Ayarları
+                        </h3>
 
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                              <div className="form-group">
-                                <label>Yeni Şifre</label>
-                                <input type="password" name="newPassword" className="form-input" value={profileData.newPassword} onChange={handleProfileChange} placeholder="Yeni şifreniz" />
+                                <label style={fLabelStyle}>Yeni Şifre</label>
+                                <input type="password" name="newPassword" style={fInputStyle} value={profileData.newPassword} onChange={handleProfileChange} placeholder="••••••••" />
                             </div>
-
                             <div className="form-group">
-                                <label>Yeni Şifre (Tekrar)</label>
-                                <input type="password" name="confirmNewPassword" className="form-input" value={profileData.confirmNewPassword} onChange={handleProfileChange} placeholder="Yeni şifrenizi tekrar girin" />
+                                <label style={fLabelStyle}>Yeni Şifre (Tekrar)</label>
+                                <input type="password" name="confirmNewPassword" style={fInputStyle} value={profileData.confirmNewPassword} onChange={handleProfileChange} placeholder="••••••••" />
                             </div>
                         </div>
 
-                        <div style={{ display: 'flex', gap: '15px', marginTop: '25px' }}>
-                            <button
-                                type="submit"
-                                className="action-button action-success"
-                                disabled={profileLoading}
-                                style={{ padding: '10px 20px',
-                                    backgroundColor: '#ffc107',}}
-                            >
-                                {profileLoading ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
-                            </button>
-                            <button
-                                type="button"
-                                className="action-button modal-cancel"
-                                onClick={() => { setIsEditingProfile(false); setProfileMessage({ type: '', text: '' }); }} // Görüntüleme moduna geri dön
-                                style={{ padding: '10px 20px' }}
-                            >
+                        <div style={{ display: 'flex', gap: '15px', marginTop: '40px', justifyContent: 'flex-end' }}>
+                            <button type="button" onClick={() => setIsEditingProfile(false)} style={cancelButtonStyle}>
                                 İptal Et
+                            </button>
+                            <button type="submit" disabled={profileLoading} style={saveButtonStyle}>
+                                {profileLoading ? 'Güncelleniyor...' : 'Değişiklikleri Kaydet'}
                             </button>
                         </div>
                     </form>
                 </div>
-            </>
+            </div>
         );
     }
+const pLabelStyle = { fontSize: '0.7rem', fontWeight: '800', color: '#bdc3c7', letterSpacing: '1px', marginBottom: '5px', display: 'block' };
+const pValueStyle = { fontSize: '1.1rem', fontWeight: '600', color: '#34495e', display: 'flex', alignItems: 'center' };
+const pButtonStyle = { marginTop: '30px', padding: '12px 25px', backgroundColor: '#f39c12', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 15px rgba(243, 156, 18, 0.2)' };
 
+const fLabelStyle = { display: 'block', marginBottom: '8px', fontWeight: '600', color: '#555', fontSize: '0.85rem' };
+const fInputStyle = { width: '100%', padding: '12px', borderRadius: '10px', border: '2px solid #edf2f7', outline: 'none' };
 
+const saveButtonStyle = { padding: '12px 30px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '10px', fontWeight: '700', cursor: 'pointer' };
+const cancelButtonStyle = { padding: '12px 30px', backgroundColor: '#ecf0f1', color: '#7f8c8d', border: 'none', borderRadius: '10px', fontWeight: '700', cursor: 'pointer' };
     // --- 3. ANA PROFİL YÖNETİMİ BİLEŞENİ (Geçiş Kontrolü) ---
     function renderProfileManagement() {
         return isEditingProfile ? renderProfileEdit() : renderProfileView();
@@ -1162,41 +1653,130 @@ useEffect(() => {
         <main className="app-main">
           {/* --- HASTA SORGULA --- */}
           {activeSection === "search" && (
-            <div className="card">
-              <h2>Hasta Bilgileri</h2>
+              <div className="card">
+                  <h2>Hasta Bilgileri</h2>
 
-              {patientError && (
-                <p style={{ color: "red", marginTop: "8px" }}>{patientError}</p>
-              )}
+                  {patientError && (
+                      <p style={{ color: "red", marginTop: "8px" }}>{patientError}</p>
+                  )}
 
-              {!patientInfo && !patientError && (
-                <p style={{ fontSize: "14px", color: "#555", marginTop: "8px" }}>
-                  Lütfen sol taraftan TC Kimlik No girerek bir hasta arayın.
-                </p>
-              )}
+                  {!patientInfo && !patientError && (
+                      <p style={{ fontSize: "14px", color: "#555", marginTop: "8px" }}>
+                          Lütfen sol taraftan TC Kimlik No girerek bir hasta arayın.
+                      </p>
+                  )}
 
-              {patientInfo && (
-                <div style={{ marginTop: "12px" }}>
-                  <table style={{ borderCollapse: "collapse", fontSize: "14px", color: "#555", width: '100%' }}>
-                    <tbody>
-                      <tr>
-                        <td style={{ padding: "4px 12px 4px 0", fontWeight: 600, width: '150px' }}>Ad Soyad</td>
-                        <td style={{ padding: "4px 0" }}>{patientInfo.first_name} {patientInfo.last_name}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: "4px 12px 4px 0", fontWeight: 600 }}>TC Kimlik No</td>
-                        <td style={{ padding: "4px 0" }}>{patientInfo.tc_no}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: "4px 12px 4px 0", fontWeight: 600 }}>Doğum Tarihi</td>
-                        <td style={{ padding: "4px 0" }}>{formatDate(patientInfo.date_of_birth) || 'Bilinmiyor'}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+                  {patientInfo && (
+                      <div style={{ marginTop: "20px" }}>
+                          {/* 1. Hasta Temel Bilgileri Tablosu */}
+                          <table style={{ borderCollapse: "collapse", fontSize: "14px", color: "#555", width: '100%' }}>
+                              <tbody>
+                                  <tr>
+                                      <td style={{ padding: "4px 12px 4px 0", fontWeight: 600, width: '150px' }}>Ad Soyad</td>
+                                      <td style={{ padding: "4px 0" }}>{patientInfo.first_name} {patientInfo.last_name}</td>
+                                  </tr>
+                                  <tr>
+                                      <td style={{ padding: "4px 12px 4px 0", fontWeight: 600 }}>TC Kimlik No</td>
+                                      <td style={{ padding: "4px 0" }}>{patientInfo.tc_no}</td>
+                                  </tr>
+                                  <tr>
+                                      <td style={{ padding: "4px 12px 4px 0", fontWeight: 600 }}>Doğum Tarihi</td>
+                                      <td style={{ padding: "4px 0" }}>{formatDate(patientInfo.date_of_birth) || 'Bilinmiyor'}</td>
+                                  </tr>
+                              </tbody>
+                          </table>
+
+                            <div className="card" style={{ marginTop: '25px', borderTop: '4px solid #3498db' }}>
+                              <h3 style={{ color: '#2c3e50', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  📜 Kapsamlı Tıbbi Geçmiş
+                              </h3>
+
+                              {queriedPatientAppointments.length > 0 ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                      {queriedPatientAppointments.map((record, idx) => (
+                                          <div key={idx} style={{
+                                              padding: '15px',
+                                              borderRadius: '10px',
+                                              border: '1px solid #eef2f3',
+                                              background: record.status === 'completed' ? '#fff' : '#fcfcfc',
+                                              boxShadow: '0 2px 5px rgba(0,0,0,0.02)'
+                                          }}>
+                                              {/* 1. Üst Bilgi: Tarih ve Tür */}
+                                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                                                  <span style={{ fontWeight: 'bold', color: '#34495e' }}>
+                                                      📅 {new Date(record.appointment_date).toLocaleDateString('tr-TR')}
+                                                  </span>
+                                                  <span style={{
+                                                      fontSize: '0.75rem',
+                                                      padding: '3px 10px',
+                                                      borderRadius: '12px',
+                                                      backgroundColor: record.appointmentType === 'Sonuç' ? '#e1f5fe' : '#fff9c4',
+                                                      color: record.appointmentType === 'Sonuç' ? '#01579b' : '#f57f17'
+                                                  }}>
+                                                      {record.appointmentType || 'Muayene'}
+                                                  </span>
+                                              </div>
+
+                                              {/* 2. Doktor Bilgisi */}
+                                              <div style={{ marginBottom: '8px' }}>
+                                                  <span style={{ fontSize: '0.9rem', fontWeight: '600', color: '#2980b9' }}>
+                                                      👨‍⚕️ {record.doctor_title} {record.doctor_first_name} {record.doctor_last_name}
+                                                  </span>
+                                                  <small style={{ color: '#95a5a6', marginLeft: '8px' }}>
+                                                      ({record.doctor_branch})
+                                                  </small>
+                                              </div>
+
+                                              {/* 3. Tanı ve Klinik Notlar */}
+                                              <div style={{ backgroundColor: '#f8f9fa', padding: '10px', borderRadius: '5px', marginBottom: '10px' }}>
+                                                  <strong>🩺 Tanı ve Bulgular:</strong>
+                                                  <p style={{ margin: '5px 0', fontStyle: 'italic', color: '#7f8c8d' }}>
+                                                      {record.note || "Tanı girişi yapılmamış."}
+                                                  </p>
+                                              </div>
+
+                                              {/* 4. Reçete (Eğer varsa) */}
+                                              {record.prescription && (
+                                                  <div style={{ marginBottom: '15px', padding: '10px', borderLeft: '3px solid #27ae60', backgroundColor: '#fafffa' }}>
+                                                      <strong style={{ color: '#27ae60' }}>💊 Reçete / İlaçlar:</strong>
+                                                      <p style={{ margin: '5px 0', fontSize: '0.9rem' }}>{record.prescription}</p>
+                                                  </div>
+                                              )}
+
+                                              {/* 5. YENİ: TAHLİL VE RADYOLOJİ BUTONLARI */}
+                                              <div style={{ display: 'flex', gap: '10px', marginTop: '10px', borderTop: '1px solid #f1f1f1', paddingTop: '10px' }}>
+
+                                                  {/* Tahlil Butonu - record.lab_report_url gibi bir kolonun olduğunu varsayıyoruz */}
+                                                  <button
+                                                      onClick={() => record.lab_report_url ? window.open(record.lab_report_url) : alert('Bu randevuya ait tahlil sonucu bulunamadı.')}
+                                                      style={{ padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer', backgroundColor: '#ebf5ff', border: '1px solid #3498db', color: '#3498db', borderRadius: '5px' }}
+                                                  >
+                                                      🧪 Tahlil Sonuçları
+                                                  </button>
+
+                                                  {/* Radyoloji Butonu - record.radiology_url gibi bir kolonun olduğunu varsayıyoruz */}
+                                                  <button
+                                                      onClick={() => record.radiology_url ? window.open(record.radiology_url) : alert('Görüntüleme kaydı (MR/Röntgen) bulunamadı.')}
+                                                      style={{ padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer', backgroundColor: '#fff5f5', border: '1px solid #e74c3c', color: '#e74c3c', borderRadius: '5px' }}
+                                                  >
+                                                      🖼 Radyolojik Görüntü
+                                                  </button>
+                                              </div>
+                                          </div>
+                                      ))}
+                                  </div>
+                              ) : (
+                                  <p style={{ textAlign: 'center', color: '#95a5a6', padding: '20px' }}>
+                                      Hastaya ait geçmiş tıbbi kayıt bulunamadı.
+                                  </p>
+                              )}
+                          </div>
+                      </div> // patientInfo içeriğini kapatan div
+                  )}
+              </div> // Ana card'ı kapatan div
           )}
+
+
 
           {/* --- DOKTOR PANELİ: RANDEVULAR --- */}
           {activeSection === "panel" && (
@@ -1204,6 +1784,30 @@ useEffect(() => {
               <h1 style={{ fontSize: "24px", marginBottom: "16px" }}>
                 Randevular
               </h1>
+{stats && (
+
+                      <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                          gap: '20px',
+                          marginBottom: '25px'
+                      }}>
+                          <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', borderLeft: '5px solid #007bff', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                              <h4 style={{ margin: 0, fontSize: '13px', color: '#6b7280', textTransform: 'uppercase' }}>Bugün Bekleyen</h4>
+                              <div style={{ fontSize: '28px', fontWeight: 'bold', marginTop: '10px', color: '#1f2937' }}>{stats.todayAppointments}</div>
+                          </div>
+
+                          <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', borderLeft: '5px solid #10b981', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                              <h4 style={{ margin: 0, fontSize: '13px', color: '#6b7280', textTransform: 'uppercase' }}>Bu Haftaki Toplam</h4>
+                              <div style={{ fontSize: '28px', fontWeight: 'bold', marginTop: '10px', color: '#1f2937' }}>{stats.weeklyTotal}</div>
+                          </div>
+
+                          <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', borderLeft: '5px solid #f59e0b', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                              <h4 style={{ margin: 0, fontSize: '13px', color: '#6b7280', textTransform: 'uppercase' }}>Tamamlanan Randevular</h4>
+                              <div style={{ fontSize: '28px', fontWeight: 'bold', marginTop: '10px', color: '#1f2937' }}>{stats.completedTotal}</div>
+                          </div>
+                      </div>
+                      )}
 
               <div className="card">
                 {/* Filtreleme Arayüzü */}

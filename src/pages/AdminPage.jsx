@@ -1,5 +1,5 @@
 // src/pages/AdminPage.jsx (NİHAİ VE TAM HALİ - Modal Detay ve Sarı Buton)
-
+import axios from 'axios';
 import { useState, useEffect, useMemo } from "react";
 import "../styles/layout.css";
 
@@ -16,7 +16,8 @@ import api, {
       getGeneralReports,
       getAppointmentStats,
       initializeAuthToken,
-      getDoctorsBySpecialization
+      getDoctorsBySpecialization,
+      getDoctorPerformance
 
 } from "../services/api";
 
@@ -32,6 +33,53 @@ const [specializationData, setSpecializationData] = useState([]);
 const [doctorData, setDoctorData] = useState([]);
 const [selectedSpec, setSelectedSpec] = useState(null);
 const [selectedLog, setSelectedLog] = useState(null); // Tıklanan logu tutacak
+const [performanceData, setPerformanceData] = useState([]);
+const [selectedDoctorDetails, setSelectedDoctorDetails] = useState(null);
+// AdminPage.jsx içinde yeni bir state ve useEffect ekle
+const [leaveRequests, setLeaveRequests] = useState([]);
+const [leaveTab, setLeaveTab] = useState("pending"); // "pending", "approved", "rejected"
+const filteredRequests = leaveRequests.filter(req =>
+    req.status.toString().toLowerCase() === leaveTab.toLowerCase()
+);
+
+const fetchLeaveRequests = async () => {
+    try {
+        const res = await api.get('/admin/leave-requests');
+        setLeaveRequests(res.data);
+    } catch (err) {
+        console.error("İzin verileri çekilemedi:", err);
+        // Hatanın nedenini alert ile ekrana bas ki ne olduğunu anlayalım
+        alert("Sunucu Hatası (500): " + (err.response?.data?.error || "Backend kodunu kontrol edin."));
+    }
+};
+
+const handleApproveLeave = async (requestId, doctorId, startDate) => {
+    try {
+        await api.post('/admin/approve-leave', {
+            requestId, // Talebin kendi ID'si
+            doctorId,  // Doktorun ID'si
+            startDate  // İzin günü
+        });
+        alert("İzin başarıyla onaylandı!");
+        fetchLeaveRequests(); // İzin listesini yeniler (Böylece onaylananlara geçer)
+        fetchUsers();         // Doktor detayındaki rozeti güncellemek için
+    } catch (err) {
+        alert("Hata oluştu.");
+    }
+};
+
+const handleRejectLeave = async (requestId) => {
+    if (!window.confirm("Bu izin talebini reddetmek istediğinize emin misiniz?")) return;
+    try {
+        // 'api' servisini kullanmak daha güvenlidir
+        await api.post('/admin/reject-leave', { requestId });
+        alert("İzin talebi reddedildi.");
+        fetchLeaveRequests(); // Listeyi yeniler
+    } catch (err) {
+        console.error("Reddetme hatası:", err);
+        alert(err.response?.data?.message || "Reddetme işlemi sırasında bir hata oluştu.");
+    }
+};
     // --- CANLI VERİ STATE'LERİ ---
     const [specializations, setSpecializations] = useState([]);
     const [reports, setReports] = useState(null);
@@ -43,13 +91,14 @@ const [selectedLog, setSelectedLog] = useState(null); // Tıklanan logu tutacak
 
     // YENİ KULLANICI EKLEME İÇİN TEK BİR FORM KULLANIYORUZ
     const [registerForm, setRegisterForm] = useState({
-        email: "",
-        password: "",
-        role: "doctor",
-        first_name: "",
-        last_name: "",
-        specialization: "",
-        title: "Dr.",
+        username: '',
+        email: '',
+        password: '',
+        firstName: '',
+        lastName: '',
+        role: 'doctor',
+         specializationId: '',
+        title: 'Dr.'
     });
     const [registerMessage, setRegisterMessage] = useState(null);
 
@@ -178,6 +227,19 @@ const handleSpecializationClick = (data) => {
         setShowClinicDetailModal(false);
     }, [activeSection, period]); //
 
+useEffect(() => {
+    if (activeSection === "performance") {
+        getDoctorPerformance()
+            .then(res => {
+                console.log("📊 Performans verisi:", res.data);
+                setPerformanceData(res.data);
+            })
+            .catch(err => {
+                console.error("Performans verisi alınamadı:", err);
+                setPerformanceData([]);
+            });
+    }
+}, [activeSection]);
 
 
     /* ================= DATA FILTERING ================= */
@@ -207,10 +269,13 @@ const handleSpecializationClick = (data) => {
         }
     };
 
-    // --- KULLANICI EKLEME İŞLEMLERİ ---
-    function handleRegisterFormChange(e) {
-        setRegisterForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-    }
+  function handleRegisterFormChange(e) {
+      const { name, value } = e.target;
+      setRegisterForm((prev) => ({
+          ...prev,
+          [name]: value // Burada name="specialization" olduğu için state'e öyle kaydolur
+      }));
+  }
 
     const handleRegisterSubmit = async (e) => {
         e.preventDefault();
@@ -222,12 +287,20 @@ const handleSpecializationClick = (data) => {
         }
 
         try {
-            await register(registerForm);
+            await register(registerForm); // Mevcut gönderme şeklin doğru
             setRegisterMessage({ type: "success", text: `Yeni ${registerForm.role} başarıyla eklendi.` });
 
             await fetchUsers();
-            setRegisterForm({ email: '', password: '', role: 'doctor', first_name: '', last_name: '', specialization: '', title: 'Dr.' });
-
+            setRegisterForm({
+                email: '',
+                password: '',
+                role: 'doctor',
+                first_name: '',
+                last_name: '',
+                specialization: '',
+                title: 'Dr.',
+                academic_background: '' // Bunu ekledik
+            });
         } catch (error) {
             setRegisterMessage({ type: 'error', text: 'Kayıt başarısız oldu: ' + (error.response?.data || 'Sunucu hatası.') });
         }
@@ -285,6 +358,45 @@ const fetchLogs = async () => {
         setLogs([]);
     }
 };
+
+
+function renderLeaveRequests() {
+    return (
+        <div className="card">
+            <h2>⏳ Bekleyen İzin Talepleri</h2>
+            {leaveRequests.length === 0 ? <p>Bekleyen talep yok.</p> : (
+                <table className="doctor-table">
+                    <thead>
+                        <tr>
+                            <th>Doktor</th>
+                            <th>İzin Tarihi</th>
+                            <th>İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {leaveRequests.map(req => (
+                            <tr key={req.id}>
+                                <td>{req.title} {req.first_name} {req.last_name}</td>
+                                <td>{new Date(req.start_date).toLocaleDateString('tr-TR')}</td>
+                                <td>
+                                    <button
+                                        className="primary-button"
+                                        style={{ backgroundColor: '#2ecc71', marginRight: '5px' }}
+                                        onClick={() => handleApproveLeave(req)}
+                                    >
+                                        Onayla
+                                    </button>
+                                    <button className="primary-button" style={{ backgroundColor: '#e74c3c' }}>Reddet</button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+        </div>
+    );
+}
+
 
 // renderLogs Fonksiyonu
 function renderLogs() {
@@ -387,66 +499,83 @@ function renderLogs() {
 
         return (
             <div>
-                <h1 className="admin-title">Doktor Yönetimi</h1>
-                {error && <p style={{ color: 'red' }}>{error}</p>}
+                <div className="admin-subcard-header" style={{ marginBottom: '20px' }}>
+                    <h1 className="admin-title" style={{ margin: 0 }}>Doktor Yönetimi</h1>
+                    <button className="primary-button" onClick={() => { setActiveSection('add'); setRegisterForm({...registerForm, role: 'doctor'}); }}>
+                        Yeni Doktor Ekle
+                    </button>
+                </div>
 
-                <div className="card">
-                    <div className="admin-subcard-header">
-                        <h3>Mevcut Doktorlar ({doctorsList.length})</h3>
-                        <button className="primary-button" onClick={() => { setActiveSection('add'); setRegisterForm({...registerForm, role: 'doctor'}); }}>
-                            Yeni Doktor Ekle
+                <div className="search-row" style={{ marginBottom: '30px' }}>
+                    <input
+                        className="form-input"
+                        placeholder="Doktor veya branş ara..."
+                        value={doctorSearch}
+                        onChange={(e) => setDoctorSearch(e.target.value)}
+                        style={{ width: '100%', maxWidth: '400px' }}
+                    />
+                </div>
+
+                <div className="doctor-grid">
+                    {doctorsList.map((d) => (
+                        <div key={d.id} className="doctor-postit-card">
+                            <div className="doctor-accent"></div>
+
+                            <div style={{ marginBottom: '15px' }}>
+                                <div style={{ fontSize: '0.8rem', color: '#95a5a6', fontWeight: 'bold' }}>ID: #{d.id}</div>
+                                <h3 style={{ margin: '5px 0', color: '#2c3e50', fontSize: '1.2rem' }}>
+                                    {d.title || 'Dr.'} {d.first_name} {d.last_name}
+                                </h3>
+                                <span style={{
+                                    fontSize: '0.8rem',
+                                    padding: '4px 10px',
+                                    borderRadius: '12px',
+                                    backgroundColor: '#fdf6e3',
+                                    color: '#b58900',
+                                    fontWeight: '600'
+                                }}>
+                                    🩺 {d.specialization || 'Genel'}
+                                </span>
+                            </div>
+
+                            <div style={{ fontSize: '0.9rem', color: '#7f8c8d', marginBottom: '20px' }}>
+                                <div style={{ marginBottom: '5px' }}>📧 {d.email}</div>
+                            </div>
+
+                            <div style={{
+                                display: 'flex',
+                                gap: '10px',
+                                borderTop: '1px solid #f1f1f1',
+                                paddingTop: '15px'
+                            }}>
+                        <button
+                            className="chip-button"
+                            style={{ flex: 1, backgroundColor: '#eee' }}
+                            onClick={() => {
+                                console.log("🔍 SEÇİLEN DOKTOR OBJESİ:", d);
+                                console.log("🎓 AKADEMİK VERİ VAR MI?:", d.academic_background);
+                                setSelectedDoctorDetails(d);
+                            }}
+                        >
+                            🔍Detay
                         </button>
-                    </div>
-
-                    <div className="search-row">
-                        <input
-                            className="form-input"
-                            placeholder="Doktor ara..."
-                            value={doctorSearch}
-                            onChange={(e) => setDoctorSearch(e.target.value)}
-                        />
-                    </div>
-
-                    <table className="admin-table">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Ad Soyad</th>
-                                <th>E-posta</th>
-                                <th>Ünvan</th> {/* YENİ KOLON BAŞLIĞI */}
-                                <th>Branş</th>
-                                <th>İşlemler</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {doctorsList.map((d) => (
-                                <tr key={d.id}>
-                                    <td>{d.id}</td>
-                                    <td>
-                                        {d.first_name} {d.last_name}
-                                    </td>
-                                    <td>{d.email}</td>
-                                    <td>{d.title || 'Dr.'}</td> {/* ÜNVAN VERİSİ */}
-                                    <td>{d.specialization || 'N/A'}</td>
-                                    <td>
-                                        <button
-                                            className="chip-button chip-info"
-                                            onClick={() => handleEditClick(d)}
-                                            style={{ marginRight: '8px' }}
-                                        >
-                                            Düzenle
-                                        </button>
-                                        <button
-                                            className="chip-button chip-danger"
-                                            onClick={() => handleDelete(d.id, 'Doktor')}
-                                        >
-                                            Sil
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                                <button
+                                    className="chip-button chip-info"
+                                    onClick={() => handleEditClick(d)}
+                                    style={{ flex: 1, justifyContent: 'center' }}
+                                >
+                                    Düzenle
+                                </button>
+                                <button
+                                    className="chip-button chip-danger"
+                                    onClick={() => handleDelete(d.id, 'Doktor')}
+                                    style={{ flex: 1, justifyContent: 'center' }}
+                                >
+                                    Sil
+                                </button>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             </div>
         );
@@ -558,10 +687,39 @@ function renderLogs() {
                                     ))}
                                 </select>
                             </div>
+
                             <div className="form-field">
-                                <label>Uzmanlık Alanı</label>
-                                <input type="text" name="specialization" value={registerForm.specialization} onChange={handleRegisterFormChange} className="form-input" required />
+                                        <label>Uzmanlık Alanı (Poliklinik)</label>
+                                        <input
+                                            type="text"
+                                            name="specialization"
+                                            value={registerForm.specialization || ''}
+                                            onChange={handleRegisterFormChange}
+                                            className="form-input"
+                                            placeholder="Örn: Kardiyoloji"
+                                            required
+                                        />
+                                    </div>
+
+
+                            <div className="form-field">
+                                <label>Akademik Geçmiş</label>
+                                <textarea
+                                    name="academic_background"
+                                    className="form-input"
+                                    placeholder="Eğitim bilgilerini alt alta yazınız..."
+                                    /* value ve onChange aynı alan ismini (academic_background) kullanmalı */
+                                    value={registerForm.academic_background || ''}
+                                    onChange={(e) => {
+                                        setRegisterForm(prev => ({
+                                            ...prev,
+                                            academic_background: e.target.value
+                                        }));
+                                    }}
+                                />
                             </div>
+
+
                         </>
                     )}
                     <button type="submit" className="appointment-submit" style={{ marginTop: '15px' }}>
@@ -615,8 +773,39 @@ function renderLogs() {
                         </div>
 
                         <div className="form-field">
-                            <label>Uzmanlık Alanı</label>
-                            <input type="text" name="specialization" value={editingDoctor.specialization} onChange={handleEditChange} className="form-input" required />
+                           <label>Uzmanlık Alanı (Poliklinik)</label>
+                           <input
+                               type="text"
+                               name="specialization"
+                               value={registerForm.specialization || ''} // registerForm state'ine bağlı olmalı
+                               onChange={handleRegisterFormChange} // Yeni kayıt fonksiyonunu kullanmalı
+                               className="form-input"
+                               placeholder="Örn: Kardiyoloji"
+                               required
+                           />
+                       </div>
+
+                        <div className="form-field">
+                            <label>Akademik Geçmiş (Her satıra bir eğitim bilgisi giriniz)</label>
+                            <textarea
+                                // 1. Backend'in beklediği isim
+                                name="academic_background"
+                                className="form-input"
+                                style={{ minHeight: '100px', resize: 'vertical' }}
+                                placeholder="Örn: Hacettepe Üniversitesi Tıp Fakültesi - 2010"
+                                // 2. Senin çalışan mantığın (academic_background üzerinden)
+                                value={Array.isArray(editingDoctor.academic_background)
+                                       ? editingDoctor.academic_background.join('\n')
+                                       : (editingDoctor.academic_background || '')}
+                                // 3. Yazmanı sağlayan onChange mantığı
+                                onChange={(e) => {
+                                    const lines = e.target.value.split('\n');
+                                    setEditingDoctor(prev => ({
+                                        ...prev,
+                                        academic_background: lines // State'e dizi olarak atıyoruz
+                                    }));
+                                }}
+                            />
                         </div>
 
                         <div className="modal-actions">
@@ -872,28 +1061,338 @@ function renderLogs() {
                 </>
             );
 }
+function renderPerformance() {
+    return (
+        <div className="card">
+            <h1 className="admin-title">Doktor Performansları</h1>
 
-        // ANA RETURN BLOĞU
+            <table className="admin-table">
+                <thead>
+                    <tr>
+                        <th>Doktor</th>
+                        <th>Branş</th>
+                        <th>Tamamlanan %</th>
+                        <th>İptal %</th>
+                        <th>Yorum</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {performanceData.length > 0 ? (
+                        performanceData.map(d => (
+                            <tr key={d.id}>
+                                <td>{d.doctor}</td>
+                                <td>{d.specialization}</td>
+                                <td>%{d.completionRate}</td>
+                                <td>%{d.score}</td>
+                                <td>
+                                    {d.status === "risk" && "🔴 Riskli"}
+                                    {d.status === "normal" && "🟡 Normal"}
+                                    {d.status === "high" && "🟢 Yüksek"}
+                                </td>
+                            </tr>
+                        ))
+                    ) : (
+                        <tr>
+                            <td colSpan="5" style={{ textAlign: "center" }}>
+                                Performans verisi bulunamadı
+                            </td>
+                        </tr>
+                    )}
+                </tbody>
+
+            </table>
+        </div>
+    );
+}
+
+function renderDoctorDetailsModal() {
+    if (!selectedDoctorDetails) return null;
+    const d = selectedDoctorDetails;
+
+    // İzin tarihlerini güvenli bir şekilde ayrıştırma
+    let leaveDates = [];
+    try {
+        if (d.leave_dates) {
+            leaveDates = typeof d.leave_dates === 'string' ? JSON.parse(d.leave_dates) : d.leave_dates;
+        }
+    } catch (e) {
+        console.error("İzin tarihleri ayrıştırma hatası:", e);
+    }
+
+    return (
+        <div style={{
+            position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+            backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex',
+            justifyContent: 'center', alignItems: 'center', zIndex: 9999
+        }} onClick={() => setSelectedDoctorDetails(null)}>
+
+            <div style={{
+                background: 'white', padding: '30px', borderRadius: '25px',
+                width: '90%', maxWidth: '500px', color: '#2c3e50', position: 'relative',
+                boxShadow: '0 15px 35px rgba(0,0,0,0.2)'
+            }} onClick={e => e.stopPropagation()}>
+
+                {/* Profil Başlığı */}
+                <div style={{ textAlign: 'center', marginBottom: '25px' }}>
+                    <div style={{
+                        width: '70px', height: '70px', background: '#ffc107', borderRadius: '50%',
+                        margin: '0 auto 15px', display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', color: 'white', fontSize: '1.6rem', fontWeight: 'bold'
+                    }}>
+                        {d.first_name ? d.first_name[0].toUpperCase() : 'D'}
+                        {d.last_name ? d.last_name[0].toUpperCase() : ''}
+                    </div>
+                    {/* Backend'den gelen Ceyhun Karagöz verisini kullanıyoruz */}
+                    <h2 style={{ margin: 0, fontSize: '1.7rem' }}>{d.title} {d.first_name} {d.last_name}</h2>
+                    <p style={{ color: '#ffc107', fontWeight: 'bold', margin: '5px 0' }}>{d.specialization}</p>
+                    <small style={{ color: '#95a5a6' }}>{d.email}</small>
+                </div>
+
+                {/* Akademik Geçmiş */}
+                <div style={{ background: '#f8f9fa', padding: '15px', borderRadius: '15px', borderLeft: '6px solid #ffc107', marginBottom: '15px' }}>
+                    <h4 style={{ marginTop: 0, color: '#2c3e50', fontSize: '0.9rem', marginBottom: '8px' }}>📚 Akademik Geçmiş</h4>
+                    <div style={{ fontSize: '0.9rem', lineHeight: '1.5', color: '#34495e', whiteSpace: 'pre-wrap' }}>
+                        {d.academic_background || "Kayıtlı akademik geçmiş bilgisi bulunamadı."}
+                    </div>
+                </div>
+
+                {/* Yaklaşan İzinler */}
+                <div style={{ padding: '15px', background: '#fff', borderRadius: '15px', border: '1px solid #f1f1f1', marginBottom: '20px' }}>
+                    <h4 style={{ marginTop: 0, color: '#2c3e50', fontSize: '0.9rem', marginBottom: '10px' }}>📅 Yaklaşan İzinler</h4>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {leaveDates && leaveDates.length > 0 ? (
+                            leaveDates.map((date, index) => (
+                                <span key={index} style={{
+                                    backgroundColor: '#fff3cd', color: '#856404',
+                                    padding: '5px 12px', borderRadius: '15px', fontSize: '0.75rem',
+                                    border: '1px solid #ffeeba', fontWeight: '600'
+                                }}>
+                                    {new Date(date).toLocaleDateString('tr-TR')}
+                                </span>
+                            ))
+                        ) : (
+                            <span style={{ color: '#95a5a6', fontSize: '0.8rem', fontStyle: 'italic' }}>Kayıtlı izin bulunmuyor.</span>
+                        )}
+                    </div>
+                </div>
+
+                {/* Butonlar Grubu */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {/* E-Posta Butonu - Hover Efektli */}
+                    <button
+                        style={{
+                            width: '100%', padding: '12px', borderRadius: '12px',
+                            border: '2px solid #ffc107', background: 'white',
+                            color: '#ffc107', fontWeight: 'bold', cursor: 'pointer',
+                            fontSize: '0.95rem', transition: 'all 0.3s ease'
+                        }}
+                        onMouseEnter={(e) => {
+                            e.target.style.background = '#fff9e6';
+                            e.target.style.transform = 'scale(1.02)';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.target.style.background = 'white';
+                            e.target.style.transform = 'scale(1)';
+                        }}
+                        onClick={() => window.location.href = `mailto:${d.email}`}
+                    >
+                        ✉️ Doktora E-Posta Gönder
+                    </button>
+
+                    {/* Kapat Butonu - Hover Efektli */}
+                    <button
+                        onClick={() => setSelectedDoctorDetails(null)}
+                        style={{
+                            width: '100%', padding: '15px',
+                            backgroundColor: '#ffc107', border: 'none', borderRadius: '12px',
+                            fontWeight: 'bold', cursor: 'pointer', color: 'white',
+                            fontSize: '1rem', transition: 'all 0.3s ease',
+                            boxShadow: '0 4px 10px rgba(255, 193, 7, 0.3)'
+                        }}
+                        onMouseEnter={(e) => {
+                            e.target.style.backgroundColor = '#e5ac00';
+                            e.target.style.transform = 'scale(1.02)';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.target.style.backgroundColor = '#ffc107';
+                            e.target.style.transform = 'scale(1)';
+                        }}
+                    >
+                        Kapat
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// AdminPage.jsx içinde yeni bir render fonksiyonu
+function renderLeaveManagement() {
+    // leaveTab state'ine göre filtreleme (pending, approved, rejected)
+    const filteredData = leaveRequests.filter(req => req.status === leaveTab);
+
+    return (
+        <div style={{ padding: '20px' }}>
+            {/* Üst Başlık */}
+            <div style={{ marginBottom: '30px', borderBottom: '2px solid #f1f1f1', paddingBottom: '20px' }}>
+                <h1 style={{ margin: 0, color: '#2c3e50', fontSize: '1.8rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ backgroundColor: '#fff3cd', padding: '10px', borderRadius: '15px' }}>⚖️</span>
+                    İzin Yönetim Paneli
+                </h1>
+            </div>
+
+            {/* Profesyonel Navigasyon Sekmeleri */}
+            <div style={{
+                display: 'flex', gap: '10px', marginBottom: '30px',
+                background: '#f8f9fa', padding: '10px', borderRadius: '18px', width: 'fit-content'
+            }}>
+                {[
+                    { id: 'pending', label: '⏳ Bekleyenler', color: '#ffc107' },
+                    { id: 'approved', label: '✅ Onaylananlar', color: '#2ecc71' },
+                    { id: 'rejected', label: '❌ Reddedilenler', color: '#e74c3c' }
+                ].map(tab => (
+                    <button
+                        key={tab.id}
+                        onClick={() => setLeaveTab(tab.id)}
+                        style={{
+                            padding: '12px 24px', borderRadius: '12px', border: 'none',
+                            cursor: 'pointer', fontWeight: 'bold',
+                            backgroundColor: leaveTab === tab.id ? tab.color : 'transparent',
+                            color: leaveTab === tab.id ? 'white' : '#7f8c8d',
+                            transition: 'all 0.3s ease'
+                        }}
+                    >
+                        {tab.label}
+                    </button>
+                ))}
+            </div>
+
+            {/* Dinamik Kart Alanı */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '25px' }}>
+                {filteredData.length > 0 ? (
+                    filteredData.map((req) => (
+                        <div key={req.id} style={{
+                            background: 'white', borderRadius: '22px', padding: '25px',
+                            boxShadow: '0 12px 30px rgba(0,0,0,0.06)', border: '1px solid #f0f0f0',
+                            position: 'relative', overflow: 'hidden'
+                        }}>
+                            {/* Durum Çizgisi */}
+                            <div style={{
+                                position: 'absolute', left: 0, top: 0, bottom: 0, width: '6px',
+                                backgroundColor: leaveTab === 'pending' ? '#ffc107' : leaveTab === 'approved' ? '#2ecc71' : '#e74c3c'
+                            }}></div>
+
+                            {/* Doktor Bilgisi */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '20px' }}>
+                                <div style={{ width: '45px', height: '45px', background: '#f0f2f5', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                                    {req.first_name ? req.first_name[0] : 'D'}
+                                </div>
+                                <div>
+                                    <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{req.title} {req.first_name} {req.last_name}</h3>
+                                    <span style={{ fontSize: '0.85rem', color: '#95a5a6' }}>{req.specialization}</span>
+                                </div>
+                            </div>
+
+                            {/* Tarih ve Durum Kutusu */}
+                            <div style={{ background: '#fbfbfb', padding: '15px', borderRadius: '15px', marginBottom: '20px', border: '1px solid #f1f1f1' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                    <span style={{ color: '#7f8c8d', fontSize: '0.9rem' }}>İzin Tarihi:</span>
+                                    <strong style={{ color: '#2c3e50' }}>{new Date(req.start_date).toLocaleDateString('tr-TR')}</strong>
+                                </div>
+                                <small style={{ color: leaveTab === 'pending' ? '#ffc107' : leaveTab === 'approved' ? '#2ecc71' : '#e74c3c', fontWeight: 'bold' }}>
+                                    {leaveTab === 'pending' ? '● ONAY BEKLİYOR' : leaveTab === 'approved' ? '✓ ONAYLANDI' : '✕ REDDEDİLDİ'}
+                                </small>
+                            </div>
+
+                            {/* Sadece Bekleyenlerde Butonları Göster */}
+                            {leaveTab === 'pending' && (
+                                <div style={{ display: 'flex', gap: '10px' }}>
+                                    <button
+                                        onClick={() => handleApproveLeave(req.id, req.doctor_id, req.start_date)}
+                                        style={{ flex: 2, padding: '12px', borderRadius: '12px', border: 'none', backgroundColor: '#2ecc71', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}
+                                    >Onayla</button>
+                                    <button
+                                        onClick={() => handleRejectLeave(req.id)}
+                                        style={{ flex: 1, padding: '12px', borderRadius: '12px', border: '1.5px solid #e74c3c', backgroundColor: 'transparent', color: '#e74c3c', fontWeight: 'bold', cursor: 'pointer' }}
+                                    >Reddet</button>
+                                </div>
+                            )}
+                        </div>
+                    ))
+                ) : (
+                    <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px', color: '#bdc3c7' }}>
+                        <div style={{ fontSize: '3.5rem' }}>🍃</div>
+                        <p>Bu kategoride herhangi bir talep bulunamadı.</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// --- CSS-in-JS STİL OBJELERİ ---
+
+const requestCardStyle = (type) => ({
+    background: 'white', borderRadius: '22px', padding: '25px',
+    boxShadow: '0 12px 30px rgba(0,0,0,0.06)', border: '1px solid #f0f0f0',
+    position: 'relative', overflow: 'hidden', transition: 'all 0.3s ease'
+});
+
+const avatarCircleStyle = {
+    width: '45px', height: '45px', background: '#f0f2f5', borderRadius: '12px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontWeight: 'bold', color: '#57606f', fontSize: '0.9rem'
+};
+
+const infoBoxStyle = {
+    background: '#fbfbfb', padding: '15px', borderRadius: '15px',
+    marginBottom: '20px', border: '1px solid #f1f1f1'
+};
+
+const primaryBtnStyle = (color) => ({
+    flex: 2, padding: '12px', borderRadius: '12px', border: 'none',
+    backgroundColor: color, color: 'white', fontWeight: 'bold',
+    cursor: 'pointer', transition: 'transform 0.2s ease'
+});
+
+const secondaryBtnStyle = (color) => ({
+    flex: 1, padding: '12px', borderRadius: '12px', border: `1.5px solid ${color}`,
+    backgroundColor: 'transparent', color: color, fontWeight: 'bold',
+    cursor: 'pointer'
+});
+
+function renderEmptyState(text, icon) {
+    return (
+        <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px', color: '#bdc3c7' }}>
+            <div style={{ fontSize: '3.5rem', marginBottom: '15px' }}>{icon}</div>
+            <p style={{ fontSize: '1.1rem' }}>{text}</p>
+        </div>
+    );
+}
+//ANA RETURN BLOĞU
         return (
             <div className="app-layout">
                 {/* MODALLAR */}
                 {renderEditDoctorModal()}
                 {renderClinicDetailModal()}
+                {renderDoctorDetailsModal()}
 
                 {/* SOL MENÜ (Sidebar) */}
-               {/* SOL MENÜ (Sidebar) */}
                <aside className="app-sidebar">
                    <div>
-                       <h2 className="app-sidebar-title">Cankaya Hospital</h2>
-                       <p className="app-sidebar-subtitle">@{user?.username || "admin"} · yönetici</p>
+                     <h2 className="app-sidebar-title">Cankaya Hospital</h2>
+                     <p className="app-sidebar-subtitle">@{user?.username || "admin"} · yönetici</p>
 
-                       <div className="sidebar-buttons">
+                     <div className="sidebar-buttons">
                            <button className={"sidebar-button " + (activeSection === "overview" ? "sidebar-button-active" : "")} onClick={() => setActiveSection("overview")}>Genel Bakış</button>
                            <button className={"sidebar-button " + (activeSection === "doctors" ? "sidebar-button-active" : "")} onClick={() => setActiveSection("doctors")}>Doktorlar</button>
                            <button className={"sidebar-button " + (activeSection === "patients" ? "sidebar-button-active" : "")} onClick={() => setActiveSection("patients")}>Hastalar</button>
                            <button className={"sidebar-button " + (activeSection === "clinics" ? "sidebar-button-active" : "")} onClick={() => setActiveSection("clinics")}>Poliklinikler</button>
                            <button className={"sidebar-button " + (activeSection === "reports" ? "sidebar-button-active" : "")} onClick={() => setActiveSection("reports")}>Raporlar</button>
-
+                           <button className={"sidebar-button " + (activeSection === "performance" ? "sidebar-button-active" : "")} onClick={() => setActiveSection("performance")}> Performanslar</button>
+                          <button className={"sidebar-button " + (activeSection === "leaves" ? "sidebar-button-active" : "")} onClick={() => { setActiveSection("leaves"); fetchLeaveRequests(); }}  >
+                              İzin Talepleri
+                          </button>
                            {/* Sistem Hareketleri Butonu */}
                            <button
                                className={"sidebar-button " + (activeSection === "logs" ? "sidebar-button-active" : "")}
@@ -902,7 +1401,7 @@ function renderLogs() {
                            </button>
                        </div>
                    </div>
-                   <button className="logout-button" onClick={onLogout}>Çıkış</button>
+                  <button className="logout-button" onClick={onLogout}>Çıkış</button>
                </aside>
 
                 {/* SAĞ İÇERİK (Main Content) */}
@@ -912,8 +1411,12 @@ function renderLogs() {
                     {activeSection === "patients" && renderPatientsList()}
                     {activeSection === "clinics" && renderClinics()}
                     {activeSection === "reports" && renderReports()}
-                    {activeSection === "logs" && renderLogs()} {/* Log tablosunu burada gösteriyoruz */}
+                    {activeSection === "performance" && renderPerformance()}
+                    {activeSection === "logs" && renderLogs()}
                     {activeSection === "add" && renderAddUser()}
+                    {activeSection === "leaves" && renderLeaveManagement()}
                 </main>
+
             </div>
+
         );    }

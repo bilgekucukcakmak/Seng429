@@ -10,79 +10,77 @@ const getPatientIdFromUser = async (userId) => {
 };
 
 
-// 1. Hasta Arama (Doktor/Admin) VEYA DETAY ÇEKME
-export const searchPatientByTc = async (req, res) => {
-    const tcNo = req.query.tc;
-
-    if (!tcNo) {
-        return res.status(400).send('TC numarası gerekli.');
-    }
-
+// server/controllers/patientController.js
+export const getPatientAppointmentsByTc = async (req, res) => {
+    const { tcNo } = req.params;
     try {
-        const [patients] = await pool.execute(
+        const [appointments] = await pool.execute(
             `SELECT
-                p.id,
-                p.first_name,
-                p.last_name,
-                p.tc_no,
-                p.date_of_birth,   -- KRİTİK EKLENDİ
-                p.gender,          -- KRİTİK EKLENDİ
-                p.blood_type,      -- KRİTİK EKLENDİ
-                p.height,          -- KRİTİK EKLENDİ
-                p.weight,          -- KRİTİK EKLENDİ
-                p.allergies,       -- KRİTİK EKLENDİ
-                p.diseases,        -- KRİTİK EKLENDİ
-                p.phone_number,
-                u.email
-             FROM patients p
-             JOIN users u ON p.user_id = u.id
-             WHERE p.tc_no = ?`,
+                a.*,
+                p.first_name AS patient_first_name,
+                p.last_name AS patient_last_name,
+                d.first_name AS doctor_first_name,
+                d.last_name AS doctor_last_name,
+                d.specialization AS doctor_branch,
+                d.title AS doctor_title
+             FROM appointments a
+             JOIN patients p ON a.patient_id = p.id
+             LEFT JOIN doctors d ON a.doctor_id = d.id
+             WHERE p.tc_no = ?
+             ORDER BY a.appointment_date DESC`,
             [tcNo]
         );
-
-        if (patients.length === 0) {
-            return res.status(404).send('Bu TC kimlik numarasına ait hasta bulunamadı.');
-        }
-
-        const patient = patients[0];
-
-        // Frontend'e tüm detayları ve fullName'i döndür
-        res.status(200).json({
-            ...patient,
-            fullName: `${patient.first_name} ${patient.last_name}`
-        });
-
+        res.status(200).json(appointments);
     } catch (error) {
-        console.error('Hasta arama/detay çekme hatası:', error);
-        res.status(500).send('Sunucu hatası.');
+        res.status(500).send('Veritabanı hatası: ' + error.message);
     }
 };
-
 
 // 2. Hastanın Kendi Profili
 export const getPatientProfile = async (req, res) => {
+    const userId = req.user.id; // ensureAuthenticated'den gelen ID
+    try {
+        const [rows] = await pool.execute(
+            `SELECT * FROM patients WHERE user_id = ?`,
+            [userId]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: 'Profil bulunamadı' });
+        }
+
+        res.status(200).json(rows[0]);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// server/controllers/patientController.js içinde olması gereken hali:
+
+export const createAppointment = async (req, res) => {
     const userId = req.user.id;
+    const { doctorId, appointmentDate, time, reason, appointmentType } = req.body;
 
     try {
         const patientId = await getPatientIdFromUser(userId);
+        if (!patientId) return res.status(404).send('Hasta bulunamadı.');
 
-        if (!patientId) {
-            return res.status(404).send('Hasta profili bulunamadı.');
-        }
+        // SQL sorgusunda 'time' sütununun olduğundan ve
+        // dışarıdan gelen 'time' değişkeninin buraya bağlandığından emin olun
+        const query = `
+            INSERT INTO appointments (patient_id, doctor_id, appointment_date, time, reason, status, type)
+            VALUES (?, ?, ?, ?, ?, 'scheduled', ?)
+        `;
 
-        const [profile] = await pool.execute(
-            // Kendi profilini çekerken tüm sütunları çekmek mantıklıdır
-            'SELECT * FROM patients WHERE id = ?',
-            [patientId]
-        );
-
-        res.status(200).json(profile[0]);
-
+        await pool.execute(query, [patientId, doctorId, appointmentDate, time, reason, appointmentType]);
+        res.status(201).send('Randevu oluşturuldu.');
     } catch (error) {
-        console.error('Hasta profili çekme hatası:', error);
-        res.status(500).send('Sunucu hatası.');
+        console.error(error);
+        res.status(500).send('Hata!');
     }
 };
+
+// server/controllers/appointmentController.js
 
 
 // 3. Hastanın Kendi Profilini Güncellemesi
@@ -133,6 +131,34 @@ export const updatePatientProfile = async (req, res) => {
 
 
 // 4. Doktor için Hasta Detayı (Bu fonksiyon artık kullanılmayacak, searchPatientByTc kullanılacak)
+
+// TC Numarasına göre hasta arama fonksiyonu
+export const searchPatientByTc = async (req, res) => {
+    const tcNo = req.query.tc; // Frontend ?tc=... şeklinde gönderiyor
+
+    if (!tcNo) {
+        return res.status(400).send('TC numarası gerekli.');
+    }
+
+    try {
+        const [patients] = await pool.execute(
+            `SELECT p.*, u.email
+             FROM patients p
+             JOIN users u ON p.user_id = u.id
+             WHERE p.tc_no = ?`,
+            [tcNo]
+        );
+
+        if (patients.length === 0) {
+            return res.status(404).send('Hasta bulunamadı.');
+        }
+
+        res.status(200).json(patients[0]);
+    } catch (error) {
+        console.error("Arama Hatası:", error);
+        res.status(500).send('Sunucu hatası.');
+    }
+};
 export const getPatientDetailById = async (req, res) => {
     // Bu fonksiyonu koruyabilirsiniz ancak DoctorPage.jsx'te TC'ye göre arama kullandık.
     const patientId = req.params.id;

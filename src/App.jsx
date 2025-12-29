@@ -14,6 +14,8 @@ import AdminPage from "./pages/AdminPage";
 import { initializeAuthToken, setAuthToken } from "./services/api";
 
 /* ---------------- APP CONTENT (Routing ve Yetkilendirme Mantığı) ---------------- */
+import DoctorPerformancePage from "./pages/admin/DoctorPerformancePage";
+
 
 const AppContent = ({ user, setUser, handleLogout }) => {
     const navigate = useNavigate();
@@ -80,6 +82,15 @@ const AppContent = ({ user, setUser, handleLogout }) => {
                     />
                 }
             />
+<Route
+  path="/admin/performanslar"
+  element={
+    <ProtectedRoute
+      element={DoctorPerformancePage}
+      allowedRoles={["admin"]}
+    />
+  }
+/>
 
             {/* Doktor Rotası (Adminler de erişebilir) */}
             <Route
