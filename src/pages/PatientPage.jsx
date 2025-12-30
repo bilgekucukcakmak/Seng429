@@ -479,23 +479,37 @@ const handleAppointmentChange = (e) => {
     // 2. TARİH KONTROLÜ
 
 
-       if (name === "date" && value) {
-           const [year, month, day] = value.split('-').map(Number);
-           // İsmi sabitledik, hata almanı engelledik
-           const dateCheck = new Date(year, month - 1, day);
+       const handleAppointmentChange = (e) => {
+           const { name, value } = e.target;
 
-           // Ay geçişi koruması (Ocak'tan Şubat'a geçerken alert vermez)
-           if (dateCheck.getMonth() !== month - 1) {
-               return;
-           }
+           if (name === "date" && value) {
+               console.log("--- TAKVİM TETİKLENDİ ---");
+               console.log("Gelen Ham Değer (Value):", value);
 
-           const dayOfWeek = dateCheck.getDay();
-           if (dayOfWeek === 0 || dayOfWeek === 6) {
-               alert("Hafta sonu randevu alınamaz. Lütfen bir iş günü seçiniz.");
-               setAppointment(prev => ({ ...prev, date: "" }));
-               return;
+               const [y, m, d] = value.split('-').map(Number);
+               const dateCheck = new Date(y, m - 1, d, 12, 0, 0);
+
+               console.log("JS'in Oluşturduğu Tarih:", dateCheck.toDateString());
+               console.log("Seçilen Ay:", m, "| JS Ayı:", dateCheck.getMonth() + 1);
+               console.log("Gün İndeksi (0:Pazar, 6:Cumartesi):", dateCheck.getDay());
+
+               // HATA BURADA MI? (Ay Kayması Kontrolü)
+               if (dateCheck.getMonth() + 1 !== m) {
+                   console.warn("⚠️ AY KAYMASI YAKALANDI! (Örn: 31 Şubat -> Mart oldu)");
+                   return; // İşte bu satır hatayı susturacak olan yer.
+               }
+
+               const dayOfWeek = dateCheck.getDay();
+               if (dayOfWeek === 0 || dayOfWeek === 6) {
+                   console.error("❌ HAFTA SONU UYARISI VERİLİYOR!");
+                   alert("Hafta sonu randevu alınamaz. Lütfen bir iş günü seçiniz.");
+                   setAppointment(prev => ({ ...prev, date: "" }));
+                   return;
+               }
            }
-       }
+           // ... diğer kısımlar ...
+           setAppointment(prev => ({ ...prev, [name]: value }));
+       };
     // 3. GENEL GÜNCELLEME (Tarih, Neden vb. için)
     setAppointment(prev => ({
         ...prev,

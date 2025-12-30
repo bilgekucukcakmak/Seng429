@@ -370,8 +370,7 @@ export const getPatientAppointments = async (req, res) => {
             FROM appointments a
             JOIN patients p ON a.patient_id = p.id
             JOIN doctors d ON a.doctor_id = d.id
-            /* BURAYI DEĞİŞTİRDİK: patients tablosundaki user_id üzerinden filtrele */
-            WHERE p.user_id = ?
+             WHERE p.user_id = ?
             ORDER BY a.appointment_date DESC, a.time DESC
             `,
             [userId]
