@@ -246,61 +246,85 @@ export default function PatientPage({ user, onLogout }) {
 
 
 
-
+    // PatientPage.jsx içindeki filteredDoctors kısmı
     const filteredDoctors = useMemo(() => {
-        if (!selectedSpecialization) return [];
-        return allDoctors.filter(d => d.specialization === selectedSpecialization);
+        if (!selectedSpecialization || !allDoctors.length) return [];
+
+        return allDoctors.filter(d =>
+            // Veritabanındaki 'specialization' ile seçilen değeri küçük harfe çevirip karşılaştır
+            String(d.specialization).trim().toLowerCase() === String(selectedSpecialization).trim().toLowerCase()
+        );
     }, [allDoctors, selectedSpecialization]);
 
-
     // --- SLOTLARI ÇEKME FONKSİYONU ---
-    const fetchSlots = async (doctorId, date) => {
-        if (!doctorId || !date) {
-            setAvailableSlots([]);
-            return;
-        }
 
-        // Tarihi parçalara ayır (2026-01-30 -> [2026, 01, 30])
-        const parts = date.split('-');
-        const year = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10) - 1; // JS'de aylar 0-11 arasıdır
-        const day = parseInt(parts[2], 10);
 
-        // Saat dilimi kaymasını önlemek için sayısal değerlerle oluştur
-        const selectedDateObj = new Date(year, month, day);
-        const dayOfWeek = selectedDateObj.getDay();
+       const fetchSlots = async (doctorId, date) => {
+               // 1. Girdi Kontrolü
+               if (!doctorId || !date) {
+                   setAvailableSlots([]);
+                   return;
+               }
 
-        // Kontrol
-        if (dayOfWeek === 0 || dayOfWeek === 6) {
-             setAvailableSlots([]);
-             setAppointmentMessage({
-                 type: 'error',
-                 text: "Hafta sonları (Cumartesi/Pazar) randevu alınamaz."
-             });
-             return;
-        }
+               // 2. Tarih Formatlama (Timezone kaymasını önlemek için manuel parçalama)
+               const parts = date.split('-');
+               const year = parseInt(parts[0], 10);
+               const month = parseInt(parts[1], 10) - 1; // JS'de aylar 0-11 arasıdır
+               const day = parseInt(parts[2], 10);
 
-        const dateShort = date; // Zaten YYYY-MM-DD formatında geliyor
-        setSlotLoading(true);
-        setAppointmentMessage({ type: '', text: '' });
+               const selectedDateObj = new Date(year, month, day);
+               const dayOfWeek = selectedDateObj.getDay(); // 0: Pazar, 6: Cumartesi
 
-        try {
-            const response = await getAvailableSlots(doctorId, dateShort);
-            setAvailableSlots(response.data);
+               // 3. Hafta Sonu Kontrolü
+               if (dayOfWeek === 0 || dayOfWeek === 6) {
+                    setAvailableSlots([]);
+                    setSlotLoading(false);
+                    setAppointmentMessage({
+                        type: 'error',
+                        text: "Hafta sonları (Cumartesi/Pazar) randevu alınamaz."
+                    });
+                    return;
+               }
 
-            const selectedSlotExists = response.data.some(
-                slot => slot.time === appointment.time && slot.status === 'available'
-            );
-            if (!selectedSlotExists) {
-                setAppointment(prev => ({ ...prev, time: "" }));
-            }
-        } catch (error) {
-            console.error("Slotlar çekilemedi:", error);
-            setAvailableSlots([]);
-        } finally {
-            setSlotLoading(false);
-        }
-    };
+               const dateShort = date; // YYYY-MM-DD formatını koru
+               setSlotLoading(true);
+               setAppointmentMessage({ type: '', text: '' });
+
+               try {
+                   // 4. API İsteği (Async/Await kullanımı düzeltildi, 'appointmen' yazım hatası giderildi)
+                   const response = await getAvailableSlots(doctorId, dateShort);
+
+                   if (!response.data || response.data.length === 0) {
+                       setAvailableSlots([]);
+                       setAppointmentMessage({
+                           type: 'info',
+                           text: "Seçilen günde müsaitlik bulunamadı."
+                       });
+                   } else {
+                       setAvailableSlots(response.data);
+                       setAppointmentMessage({ type: '', text: '' });
+
+                       // Eğer daha önce seçilen bir saat varsa ve yeni listede yoksa seçimi temizle
+                       const selectedSlotExists = response.data.some(
+                           slot => slot.time === appointment.time && slot.status === 'available'
+                       );
+                       if (!selectedSlotExists) {
+                           setAppointment(prev => ({ ...prev, time: "" }));
+                       }
+                   }
+               } catch (error) {
+                         // Hatanın Backend'den gelen GERÇEK nedenini konsola yazar
+                         console.error("Backend Hata Detayı:", error.response?.data || error.message);
+
+                         setAvailableSlots([]);
+                         setAppointmentMessage({
+                             type: 'error',
+                             text: `Hata: ${error.response?.data?.message || "Sunucu hatası oluştu."}`
+                         });
+               } finally {
+                   setSlotLoading(false);
+               }
+           };
 
 
     // --- useEffect: Slotları Çekme ---
@@ -361,7 +385,20 @@ const prescriptions = allAppointments.filter(app =>
         setEditData(profile);
         setIsEditing(false);
     };
-
+useEffect(() => {
+    const fetchDoctors = async () => {
+        try {
+            const res = await getAllDoctors();
+            // Konsolda gördüğümüz 'data' dizisini alıyoruz
+            if (res && res.data) {
+                setAllDoctors(res.data);
+            }
+        } catch (err) {
+            console.error("Doktorlar yüklenemedi:", err);
+        }
+    };
+    fetchDoctors();
+}, []);
 
    // --- RANDEVU LİSTELEME İŞLEMLERİ (Saat Parsing Düzeltildi) ---
    const fetchAppointments = async () => {
@@ -426,21 +463,40 @@ const prescriptions = allAppointments.filter(app =>
 const handleAppointmentChange = (e) => {
     const { name, value } = e.target;
 
-    if (name === "date" && value) {
-        // "2026-01-30" -> [2026, 01, 30]
-        const parts = value.split('-');
-        // Ay verisi 0-11 arası olduğu için 1 çıkarıyoruz
-        const selectedDate = new Date(parts[0], parts[1] - 1, parts[2]);
+    if (name === "doctorId") {
+            // value (seçilen ID) ile doktor listesindeki doğru ID'yi eşleştiriyoruz
+            const selectedDoc = allDoctors.find(d => String(d.id) === String(value) || String(d.doctor_id) === String(value));
 
-        const dayOfWeek = selectedDate.getDay(); // 0: Pazar, 6: Cumartesi
-
-        if (dayOfWeek === 0 || dayOfWeek === 6) {
-            alert("Hafta sonu randevu alınamaz. Lütfen bir iş günü seçiniz.");
-            setAppointment(prev => ({ ...prev, date: "" }));
-            return;
+            setAppointment(prev => ({
+                ...prev,
+                doctorId: value,
+                // Bulunan doktorun ismini tam olarak buraya yazıyoruz
+                doctorName: selectedDoc ? `${selectedDoc.title || 'Dr.'} ${selectedDoc.first_name} ${selectedDoc.last_name}` : 'Seçilmedi'
+            }));
+            return; // Aşağıdaki setAppointment'ın bu değişikliği ezmesini engelliyoruz
         }
-    }
 
+    // 2. TARİH KONTROLÜ
+
+
+       if (name === "date" && value) {
+           const [year, month, day] = value.split('-').map(Number);
+           // İsmi sabitledik, hata almanı engelledik
+           const dateCheck = new Date(year, month - 1, day);
+
+           // Ay geçişi koruması (Ocak'tan Şubat'a geçerken alert vermez)
+           if (dateCheck.getMonth() !== month - 1) {
+               return;
+           }
+
+           const dayOfWeek = dateCheck.getDay();
+           if (dayOfWeek === 0 || dayOfWeek === 6) {
+               alert("Hafta sonu randevu alınamaz. Lütfen bir iş günü seçiniz.");
+               setAppointment(prev => ({ ...prev, date: "" }));
+               return;
+           }
+       }
+    // 3. GENEL GÜNCELLEME (Tarih, Neden vb. için)
     setAppointment(prev => ({
         ...prev,
         [name]: value
@@ -454,6 +510,7 @@ const handleAppointmentChange = (e) => {
     };
 
     const handleTimeSelect = (timeSlot) => {
+        console.log("Seçilen Saat:", timeSlot); // Burayı kontrol et
         setAppointment(prev => ({ ...prev, time: timeSlot }));
         setAppointmentMessage({ type: '', text: '' });
     };
@@ -468,13 +525,14 @@ const handleAppointmentChange = (e) => {
         }
 
         try {
-            const payload = {
-                doctorId: parseInt(appointment.doctorId),
-                appointmentDate: appointment.date,
-                time: appointment.time,
-                reason: appointment.reason,
-                appointmentType: appointment.appointmentType,
-            };
+                const payload = {
+                    doctorId: parseInt(appointment.doctorId),
+                    appointmentDate: appointment.date,
+                    time: appointment.time,
+                    reason: appointment.reason,
+                    // KRİTİK: Buranın eklendiğinden emin olun
+                    appointmentType: appointment.appointmentType || "Muayene",
+                };
 
             await createAppointment(payload);
             setAppointmentMessage({ type: 'success', text: "Randevunuz başarıyla oluşturuldu! Listenizi yenilemek için bekleyin..." });
@@ -559,7 +617,7 @@ const handleAppointmentChange = (e) => {
                                     </h2>
                                     {/* Alt metin açık gri tonlarında, okunabilirlik yüksek */}
                                     <p style={{ margin: '5px 0 0 0', color: '#cbd5e1', fontSize: '0.95rem', fontWeight: '500' }}>
-                                        TC: {profile.tc_no || "22222222222"} • Hasta Protokolü: #P-{profile.id + 1000 || "1003"}
+                                        TC: {profile.tc_no || "TC No Girilmemiş"} • Hasta Protokolü: #P-{profile.id + 1000 || "----"}
                                     </p>
                                 </div>
                         {!isEditing && (
@@ -645,7 +703,53 @@ const handleAppointmentChange = (e) => {
                         </div>
                     ) : (
                         /* Düzenleme Modu Formu */
+                        /* renderProfile fonksiyonu içindeki "Düzenleme Modu Formu" kısmını şununla değiştir: */
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                            {/* T.C. Kimlik No */}
+                            <div className="form-field">
+                                <label>T.C. Kimlik No</label>
+                                <input type="text" className="form-input" name="tc_no" value={editData.tc_no || ''} onChange={handleEditChange} maxLength="11" />
+                            </div>
+
+                            {/* Telefon Numarası */}
+                            <div className="form-field">
+                                <label>Telefon Numarası</label>
+                                <input type="tel" className="form-input" name="phone_number" value={editData.phone_number || ''} onChange={handleEditChange} />
+                            </div>
+
+                            {/* Doğum Tarihi */}
+                            <div className="form-field">
+                                <label>Doğum Tarihi</label>
+                                <input type="date" className="form-input" name="date_of_birth" value={editData.date_of_birth ? editData.date_of_birth.split('T')[0] : ''} onChange={handleEditChange} />
+                            </div>
+
+                            {/* Cinsiyet */}
+                            <div className="form-field">
+                                <label>Cinsiyet</label>
+                                <select className="form-input" name="gender" value={editData.gender || ''} onChange={handleEditChange}>
+                                    <option value="">Seçiniz</option>
+                                    <option value="Erkek">Erkek</option>
+                                    <option value="Kadın">Kadın</option>
+                                </select>
+                            </div>
+
+                            {/* Kan Grubu */}
+                            <div className="form-field">
+                                <label>Kan Grubu</label>
+                                <select className="form-input" name="blood_type" value={editData.blood_type || ''} onChange={handleEditChange}>
+                                    <option value="">Seçiniz</option>
+                                    <option value="0+">0 Rh(+)</option>
+                                    <option value="0-">0 Rh(-)</option>
+                                    <option value="A+">A Rh(+)</option>
+                                    <option value="A-">A Rh(-)</option>
+                                    <option value="B+">B Rh(+)</option>
+                                    <option value="B-">B Rh(-)</option>
+                                    <option value="AB+">AB Rh(+)</option>
+                                    <option value="AB-">AB Rh(-)</option>
+                                </select>
+                            </div>
+
+                            {/* Boy ve Kilo (Mevcutlar) */}
                             <div className="form-field">
                                 <label>Boy (cm)</label>
                                 <input type="number" className="form-input" name="height" value={editData.height || ''} onChange={handleEditChange} />
@@ -654,29 +758,34 @@ const handleAppointmentChange = (e) => {
                                 <label>Kilo (kg)</label>
                                 <input type="number" className="form-input" name="weight" value={editData.weight || ''} onChange={handleEditChange} />
                             </div>
-                            <div className="form-field">
+
+                            {/* Alerjiler ve Hastalıklar (Mevcutlar) */}
+                            <div className="form-field" style={{ gridColumn: 'span 2' }}>
                                 <label>Alerjiler</label>
                                 <textarea className="form-input" name="allergies" value={editData.allergies || ''} onChange={handleEditChange} style={{ height: '60px' }} />
                             </div>
-                            <div className="form-field">
+                            <div className="form-field" style={{ gridColumn: 'span 2' }}>
                                 <label>Hastalıklar</label>
                                 <textarea className="form-input" name="diseases" value={editData.diseases || ''} onChange={handleEditChange} style={{ height: '60px' }} />
                             </div>
+
                             <div style={{ gridColumn: 'span 2', display: 'flex', gap: '10px', marginTop: '10px' }}>
                                 <button onClick={handleSave} style={{ flex: 1, padding: '12px', backgroundColor: '#1e293b', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>✓ Değişiklikleri Kaydet</button>
                                 <button onClick={handleCancel} style={{ flex: 1, padding: '12px', backgroundColor: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>İptal</button>
                             </div>
                         </div>
-                    )}
-                </div>
-            </div>
-        );
-    }
+       )}
+                   </div>
+               </div>
+           );
+       }
+   console.log("Seçilen Poliklinik:", selectedSpecialization);
+   console.log("Tüm Doktorlar:", allDoctors);
+   console.log("Filtrelenmiş Sonuç:", filteredDoctors);
 console.log("Gönderilen Saat (Slot):", appointment.time);
     function renderCreateAppointment() {
         const isDoctorAndDateSelected = appointment.doctorId && appointment.date;
-        const selectedDoctor = filteredDoctors.find(d => String(d.doctor_id) === String(appointment.doctorId));
-
+        const selectedDoctor = filteredDoctors.find(d => String(d.doctor_id || d.id) === String(appointment.doctorId));
         return (
             <div className="appointment-container" style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '25px', alignItems: 'start' }}>
 
@@ -708,11 +817,18 @@ console.log("Gönderilen Saat (Slot):", appointment.time);
                                 </div>
                                 <div className="form-field">
                                     <label style={{ fontWeight: '600' }}>Doktor</label>
-                                    <select className="form-input" name="doctorId" value={appointment.doctorId} onChange={handleAppointmentChange} required disabled={!selectedSpecialization}>
-                                        <option value="">{selectedSpecialization ? '— Doktor Seçin —' : 'Önce Poliklinik Seçin'}</option>
+                                    <select
+                                        className="form-input"
+                                        name="doctorId"
+                                        value={appointment.doctorId}
+                                        onChange={handleAppointmentChange}
+                                        required
+                                    >
+                                        <option value="">— Doktor Seçin —</option>
                                         {filteredDoctors.map((doctor) => (
-                                            <option key={doctor.doctor_id} value={doctor.doctor_id}>
-                                                Dr. {doctor.first_name} {doctor.last_name}
+                                            // Sadece doctor.id kullanıyoruz
+                                            <option key={doctor.id} value={doctor.id}>
+                                                {doctor.title || 'Dr.'} {doctor.first_name} {doctor.last_name}
                                             </option>
                                         ))}
                                     </select>
@@ -799,7 +915,7 @@ console.log("Gönderilen Saat (Slot):", appointment.time);
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.9rem' }}>
                             <div>
                                 <span style={{ color: '#666', display: 'block', fontSize: '0.75rem' }}>DOKTOR</span>
-                                <strong>{selectedDoctor ? `Dr. ${selectedDoctor.first_name} ${selectedDoctor.last_name}` : 'Seçilmedi'}</strong>
+                                 <strong>{appointment.doctorName || 'Seçilmedi'}</strong>
                             </div>
                             <div>
                                 <span style={{ color: '#666', display: 'block', fontSize: '0.75rem' }}>POLİKLİNİK</span>

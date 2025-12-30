@@ -23,41 +23,51 @@ const getRelatedId = async (tableName, userId) => {
 
 // --- REGISTER CONTROLLER ---
 export const registerUser = async (req, res) => {
-    // 1. ADIM: req.body'den akademik_geçmiş ve ünvanı (title) da alıyoruz
     const { email, password, role, first_name, last_name, specialization, title, academic_background } = req.body;
 
     try {
         const password_hash = await bcrypt.hash(password, saltRounds);
 
-        // users tablosuna ekle
+        // 1. Users tablosuna ekle
         const [userResult] = await pool.execute(
             'INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)',
             [email, password_hash, role]
         );
         const userId = userResult.insertId;
 
-        // Role göre tabloya ekleme
+        // 2. Role göre detay tablolarına ekle
         if (role === 'patient') {
             await pool.execute(
                 'INSERT INTO patients (user_id, first_name, last_name) VALUES (?, ?, ?)',
                 [userId, first_name, last_name]
             );
         } else if (role === 'doctor') {
-            // 2. ADIM: doctors tablosuna ünvan ve akademik geçmişi de ekliyoruz
             await pool.execute(
                 'INSERT INTO doctors (user_id, first_name, last_name, specialization, title, academic_background) VALUES (?, ?, ?, ?, ?, ?)',
-                [
-                    userId,
-                    first_name,
-                    last_name,
-                    specialization || 'Genel',
-                    title || 'Dr.',
-                    academic_background || null // Eğer boşsa NULL kaydet
-                ]
+                [userId, first_name, last_name, specialization || 'Genel', title || 'Dr.', academic_background || null]
             );
+
+             try {
+                 const logDetail = {
+                     id: userId,
+                     fullName: `${title || 'Dr.'} ${first_name} ${last_name}`,
+                     role: 'doctor',
+                     // BURASI ÇOK ÖNEMLİ: Branş bilgisini loga dahil ediyoruz
+                     specialization: specialization || 'Genel'
+                 };
+
+                 await pool.execute(
+                     "INSERT INTO logs (admin_id, action, details) VALUES (?, ?, ?)",
+                     [req.user?.id || null, 'DOKTOR_EKLENDI', JSON.stringify(logDetail)]
+                 );
+                 console.log("✅ Branş bilgisi logs tablosuna başarıyla eklendi.");
+             } catch (logErr) {
+                 console.error("❌ Log hatası:", logErr.message);
+             }
         }
 
-        res.status(201).json({
+        // 4. En son başarılı yanıtı dön
+        return res.status(201).json({
             message: 'Kayıt başarılı',
             userId: userId,
             role: role

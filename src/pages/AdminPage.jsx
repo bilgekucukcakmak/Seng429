@@ -431,32 +431,37 @@ function renderLogs() {
             </table>
 
 
-            {selectedLog && (
+             {selectedLog && (
                 <div className="modal-backdrop">
                     <div className="modal" style={{ borderLeft: '5px solid #ffc107', padding: '20px' }}>
                         <h2>İşlem Detayı</h2>
                         <div style={{ marginTop: '15px', lineHeight: '2' }}>
-                            {/* ID sadece numara olarak görünmeli */}
-                            <p><strong>Silinen ID:</strong> {selectedLog.id}</p>
+                            {/* ID her iki işlemde de ortak */}
+                            <p><strong>Kullanıcı ID:</strong> {selectedLog.id}</p>
 
-                            {/* Rol kontrolü: Backend 'doctor' veya 'patient' göndermeli */}
+                            {/* Rol kontrolü */}
                             <p><strong>Rol:</strong> {selectedLog.role === 'doctor' ? '👨‍⚕️ Doktor' : '👤 Hasta'}</p>
 
-                            {/* İsim alanı: Backend 'fullName' göndermeli */}
-                            <p><strong>Ad Soyad:</strong> {selectedLog.fullName || 'Bilgi Mevcut Değil'}</p>
+                            {/* ÖNEMLİ: Hem 'fullName' (silme) hem 'name' (ekleme) alanını kontrol ediyoruz */}
+                            <p><strong>Ad Soyad:</strong> {
+                                selectedLog.fullName || // Silme işlemi için
+                                selectedLog.name ||     // Ekleme işlemi için
+                                "Bilgi Mevcut Değil"
+                            }</p>
 
-                            {selectedLog.role === 'doctor' && (
-                                <>
-                                    <p><strong>Ünvan:</strong> {selectedLog.title || 'N/A'}</p>
-                                    <p><strong>Branş:</strong> {selectedLog.specialization || 'N/A'}</p>
-                                </>
-                            )}
+                            {/* Doktor branş bilgisi için ekleme/silme anahtarlarını kontrol et */}
+                              <p><strong>Branş:</strong> {selectedLog.specialization || "Bilgi Mevcut Değil"}</p>
                         </div>
-                        <button className="modal-button modal-cancel" onClick={() => setSelectedLog(null)} style={{ marginTop: '20px' }}>
+                        <button
+                            className="modal-button modal-cancel"
+                            onClick={() => setSelectedLog(null)}
+                            style={{ marginTop: '20px' }}
+                        >
                             Kapat
                         </button>
                     </div>
                 </div>
+            )}
             )}
                 </div>
             );

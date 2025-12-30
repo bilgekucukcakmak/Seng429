@@ -131,21 +131,21 @@ export const createAppointment = (payload) => api.post('/appointments', payload)
  * Not: Hafta sonu kısıtlaması Backend'de "Acil" doktoru için
  * istisna olarak tanımlanmış olmalıdır.
  */
+// src/services/api.js
 export const getAvailableSlots = (doctorId, date) =>
     api.get(`/appointments/slots/${doctorId}/${date}`);
-
 // *************** DOKTOR FONKSİYONLARI ***************
-export const getAllDoctors = () => api.get('/doctors');
+export const getAllDoctors = () => api.get('/doctor');
 export const getDoctorProfile = () => api.get('/doctor/profile');
 export const updateDoctorProfile = (data) => api.patch('/doctor/profile', data);
 export const getDoctorLeaveDates = () => api.get('/doctor/leave-dates');
-export const updateDoctorLeaveDates = (leaveDates) => api.patch('/doctor/leave', { leaveDates });
+export const updateDoctorLeaveDates = (leaveDates) => api.post('/doctor/leave-dates', { leaveDates });
 export const getDoctorAppointments = () => api.get('/appointments/doctor');
-
+export const deleteDoctorLeaveRequest = (date) => api.delete(`/doctor/leave-request/${date}`);
 
 // api.js içindeki updateAppointmentStatus fonksiyonu şuna benzemeli:
 export const updateAppointmentStatus = (id, status, note, prescription) => {
-    return api.patch(`/appointments/${id}`, { status, note, prescription });
+    return api.post(`/doctor/appointments/${id}/status`, { status, note, prescription });
 };
 
 

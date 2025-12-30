@@ -278,7 +278,6 @@ export const getDoctorsBySpecialization = async (req, res) => {
 
 
 
-// Örnek: Doktor silme fonksiyonunun içine ekle
 export const deleteDoctor = async (req, res) => {
     const { id } = req.params;
     try {
@@ -300,8 +299,8 @@ export const deleteDoctor = async (req, res) => {
 
 export const updateDoctor = async (req, res) => {
     const userId = req.params.id;
+    const adminId = req.user?.id; // İşlemi yapan adminin ID'si
 
-    // 1. DÜZELTME: Body'den gelen isme 'academicData' deyin (çakışmayı önlemek için)
     const { email, first_name, last_name, specialization, title, academic_background: academicData } = req.body;
 
     if (!email || !first_name || !last_name || !specialization || !title) {
@@ -309,31 +308,32 @@ export const updateDoctor = async (req, res) => {
     }
 
     try {
-        // 2. DÜZELTME: Veritabanına yazılacak string'i burada hazırlayın
-        // academicData boşsa boş bir string kaydedelim
         const finalAcademicBackground = Array.isArray(academicData)
             ? academicData.join('\n')
             : (academicData || "");
 
         const [updateDoctorResult] = await pool.execute(
             `UPDATE doctors
-             SET
-                 first_name = ?,
-                 last_name = ?,
-                 specialization = ?,
-                 title = ?,
-                 academic_background = ?
-             WHERE
-                 user_id = ?`,
+             SET first_name = ?, last_name = ?, specialization = ?, title = ?, academic_background = ?
+             WHERE user_id = ?`,
             [first_name, last_name, specialization, title, finalAcademicBackground, userId]
         );
 
-        // Email güncellemesi
         await pool.execute('UPDATE users SET email = ? WHERE id = ?', [email, userId]);
 
         if (updateDoctorResult.affectedRows === 0) {
             return res.status(404).send('Doktor bulunamadı.');
         }
+
+        // --- BURAYI EKLE: GÜNCELLEME LOGU ---
+        const detailObj = {
+            id: userId,
+            fullName: `${title} ${first_name} ${last_name}`,
+            email: email
+        };
+
+        await createLog(adminId, 'DOKTOR_GUNCELLEME', JSON.stringify(detailObj));
+        // -----------------------------------
 
         res.status(200).json({
             message: 'Doktor bilgileri başarıyla güncellendi.',
@@ -410,7 +410,7 @@ export const approveLeave = async (req, res) => {
             'UPDATE doctors SET leave_dates = ? WHERE user_id = ?',
             [JSON.stringify(currentLeaves), doctorId]
         );
-
+await createLog(req.user.id, 'IZIN_ONAYLANDI', `Doktor ID: ${doctorId} için ${startDate} tarihli izin onaylandı.`);
         res.json({ message: "İzin onaylandı ve profile işlendi." });
     } catch (error) {
         res.status(500).json({ message: "Sunucu hatası: " + error.message });
@@ -419,13 +419,17 @@ export const approveLeave = async (req, res) => {
 
 // server/controllers/adminController.js
 export const rejectLeave = async (req, res) => {
-    // Frontend'den 'requestId' adıyla gönderdiğin için buradan da aynı isimle almalısın
     const { requestId } = req.body;
     try {
         await pool.execute(
             'UPDATE leave_requests SET status = "rejected" WHERE id = ?',
             [requestId]
         );
+
+        // ÖNCE LOGU YAZDIR (await ile)
+        await createLog(req.user.id, 'IZIN_REDDEDILDI', `Talep ID: ${requestId} reddedildi.`);
+
+        // SONRA YANITI DÖN
         res.json({ message: "Talep reddedildi." });
     } catch (error) {
         console.error("Reddetme hatası:", error);

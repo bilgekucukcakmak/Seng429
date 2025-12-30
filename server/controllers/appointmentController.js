@@ -35,66 +35,83 @@ const getDoctorId = async (userId) => {
 // *******************************************************************
 export const createAppointment = async (req, res) => {
     const patientUserId = req.user.id;
-    // Eğer saat bazlı randevu sistemi istiyorsak, 'time' bodysinde olmalı
-    // Varsayım: `req.body` artık `{ doctorId, appointmentDate, time, reason }` içeriyor.
-    const { doctorId, appointmentDate, time, reason } = req.body;
+    // req.body içinden tüm gerekli verileri, appointmentType dahil çekiyoruz
+    const { doctorId, appointmentDate, time, reason, appointmentType } = req.body;
 
-    // Time'ın doğru geldiğini ve şemanızda 'time' sütununun olduğunu varsayıyoruz.
     const fullDate = new Date(appointmentDate);
-    const appointmentDateShort = fullDate.toISOString().split('T')[0]; // YYYY-MM-DD
+    const appointmentDateShort = fullDate.toISOString().split('T')[0];
 
     try {
+        // 1. Hastanın asıl ID'sini bul
         const patientId = await getPatientId(patientUserId);
-
         if (!patientId) {
             return res.status(404).send('Hasta kaydı bulunamadı.');
         }
 
-        // Geçmiş Tarih/Saat Kontrolü
+        // 2. Geçmiş Tarih/Saat Kontrolü
         const checkDateTime = new Date(`${appointmentDateShort}T${time || '00:00'}:00`);
         if (checkDateTime < new Date()) {
             return res.status(400).send('Randevu tarihi veya saati geçmiş bir zaman olamaz.');
         }
 
-        // --- KONTROL 1: İzin Kontrolü ---
-        const [doctorResult] = await pool.execute(
-            'SELECT leave_dates FROM doctors WHERE id = ?',
-            [doctorId]
+        // 3. KRİTİK ADIM: Doktorun asıl birincil anahtarını (ID) bul
+        // Bu adım, Foreign Key hatasını (ER_NO_REFERENCED_ROW_2) önlemek içindir.
+        const [doctorSearch] = await pool.execute(
+            'SELECT id, leave_dates FROM doctors WHERE id = ? OR user_id = ?',
+            [doctorId, doctorId]
         );
 
-        if (doctorResult.length > 0 && doctorResult[0].leave_dates) {
+        if (doctorSearch.length === 0) {
+            return res.status(404).send('Geçerli bir doktor kaydı bulunamadı.');
+        }
+
+        const actualDoctorId = doctorSearch[0].id; // Veritabanındaki gerçek 'id'
+        const rawLeaveData = doctorSearch[0].leave_dates;
+
+        // 4. İzin Kontrolü
+        if (rawLeaveData) {
             try {
-                const leaveDates = JSON.parse(doctorResult[0].leave_dates);
-                if (Array.isArray(leaveDates) && leaveDates.includes(appointmentDateShort)) {
-                    return res.status(409).send('Seçilen doktor bu tarihte izinlidir. Lütfen başka bir tarih seçin.');
+                const leaveDates = typeof rawLeaveData === 'string' ? JSON.parse(rawLeaveData) : rawLeaveData;
+                // Hem string dizisi hem de obje formatını kontrol eder
+                const isOnLeave = Array.isArray(leaveDates) && leaveDates.some(item => {
+                    const dateValue = typeof item === 'object' ? item.date : item;
+                    return dateValue && dateValue.startsWith(appointmentDateShort);
+                });
+
+                if (isOnLeave) {
+                    return res.status(409).send('Seçilen doktor bu tarihte izinlidir.');
                 }
             } catch (jsonError) {
-                console.error("İzin tarihi JSON parse hatası:", jsonError);
+                console.error("İzin verisi işleme hatası:", jsonError);
             }
         }
-        // --- İZİN KONTROL SONU ---
 
-
-        // --- KONTROL 2: Randevu Saat Çakışması Kontrolü (GÜNCELLENMİŞ) ---
+        // 5. Randevu Saat Çakışması Kontrolü (Asıl ID ile sorguluyoruz)
         const [existingAppointments] = await pool.execute(
             `SELECT id FROM appointments
              WHERE doctor_id = ?
              AND appointment_date = ?
              AND time = ?
              AND status IN ('scheduled')`,
-            [doctorId, appointmentDateShort, time] // Saat kontrolü eklendi
+            [actualDoctorId, appointmentDateShort, time]
         );
 
         if (existingAppointments.length > 0) {
-            return res.status(409).send(`Seçilen saat ${time} için bu doktorun zaten planlanmış bir randevusu bulunmaktadır. Lütfen başka bir saat seçin.`);
+            return res.status(409).send(`Seçilen saat ${time} için doktorun zaten bir randevusu bulunmaktadır.`);
         }
-        // --- ÇAKIŞMA KONTROL SONU ---
 
-
-        // --- KAYIT İŞLEMİ (Tüm Kontroller Başarılı) ---
+        // 6. KAYIT İŞLEMİ (Foreign Key hatası almamak için actualDoctorId kullanıyoruz)
         const [result] = await pool.execute(
-            'INSERT INTO appointments (patient_id, doctor_id, appointment_date, time, reason, status) VALUES (?, ?, ?, ?, ?, ?)',
-            [patientId, doctorId, appointmentDateShort, time, reason, 'scheduled'] // time eklendi
+            'INSERT INTO appointments (patient_id, doctor_id, appointment_date, time, reason, appointmentType, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [
+                patientId,
+                actualDoctorId, // foreign key ile eşleşen asıl ID
+                appointmentDateShort,
+                time,
+                reason,
+                appointmentType || 'Muayene', // Artık veritabanına doğru tip yazılacak
+                'scheduled'
+            ]
         );
 
         res.status(201).json({
@@ -103,11 +120,10 @@ export const createAppointment = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Randevu oluşturma hatası:', error);
-        res.status(500).send('Sunucu hatası: Randevu oluşturulamadı.');
+        console.error('Randevu oluşturma hatası (SQL):', error.message);
+        res.status(500).send('Sunucu hatası: Randevu oluşturulamadı. ' + error.message);
     }
 };
-
 export const getTestResults = async (req, res) => {
     const patientUserId = req.user.id;
     try {
@@ -131,66 +147,66 @@ export const getTestResults = async (req, res) => {
 // 5. Randevu Slotlarını Çekme (GET /api/appointments/slots/:doctorId/:date) (YENİ FONKSİYON)
 // *******************************************************************
 export const getAvailableSlots = async (req, res) => {
-    const { doctorId, date } = req.params; // date: YYYY-MM-DD formatında beklenir
+    const { doctorId, date } = req.params;
+    const appointmentDateShort = date; // Frontend'den gelen YYYY-MM-DD
 
     try {
-        const appointmentDateShort = date;
-
-        // 1. İzin Kontrolü (Mevcut mantık)
+        // Sorguyu hem 'id' hem de 'user_id' kontrol edecek şekilde güncelleyin
         const [doctorResult] = await pool.execute(
-            'SELECT leave_dates FROM doctors WHERE id = ?',
-            [doctorId]
-        );
+            'SELECT leave_dates FROM doctors WHERE id = ? OR user_id = ?',
+            [doctorId, doctorId]  );
 
         if (doctorResult.length === 0) {
              return res.status(404).json({ message: "Doktor bulunamadı." });
         }
 
-        const leaveDates = doctorResult[0].leave_dates ? JSON.parse(doctorResult[0].leave_dates) : [];
-        if (leaveDates.includes(appointmentDateShort)) {
-            // İzinliyse, tüm slotlar 'leave' olarak işaretlenip döndürülür.
+        // --- GÜVENLİ İZİN KONTROLÜ (DÜZELTİLDİ) ---
+        let leaveDates = [];
+        const rawLeaveData = doctorResult[0].leave_dates;
+
+        if (rawLeaveData) {
+            // Veri string ise parse et, değilse direkt kullan
+            leaveDates = typeof rawLeaveData === 'string' ? JSON.parse(rawLeaveData) : rawLeaveData;
+        }
+
+        // Hem string dizisi hem de obje dizisi formatını kontrol et
+        const isOnLeave = Array.isArray(leaveDates) && leaveDates.some(item => {
+            const dateValue = typeof item === 'object' ? item.date : item;
+            return dateValue && dateValue.startsWith(appointmentDateShort);
+        });
+
+        if (isOnLeave) {
             return res.status(200).json(FIXED_SLOTS.map(time => ({ time, status: 'leave' })));
         }
+        // --- İZİN KONTROLÜ SONU ---
 
         // 2. Dolu Randevuları Çekme
         const [bookedAppointments] = await pool.execute(
-            `SELECT time
-             FROM appointments
-             WHERE doctor_id = ?
-             AND appointment_date = ?
-             AND status IN ('scheduled')`,
+            `SELECT time FROM appointments
+             WHERE doctor_id = ? AND appointment_date = ? AND status IN ('scheduled')`,
             [doctorId, appointmentDateShort]
         );
 
-        // Dolu saatleri Set yapısına atma (Hızlı kontrol için)
         const bookedTimes = new Set(bookedAppointments.map(app => app.time));
 
         // 3. Slot Durumlarını Belirleme
         const availableSlots = FIXED_SLOTS.map(time => {
             let status = 'available';
+            if (bookedTimes.has(time)) status = 'booked';
 
-            // Randevu çakışması kontrolü
-            if (bookedTimes.has(time)) {
-                status = 'booked';
-            }
-
-            // Geçmiş saatleri kontrolü (sadece bugünün tarihiyse)
             const todayShort = new Date().toISOString().split('T')[0];
             if (appointmentDateShort === todayShort) {
                  const slotDateTime = new Date(`${appointmentDateShort}T${time}:00`);
-                 if (slotDateTime < new Date()) {
-                      status = 'past'; // Geçmişte kalan slotlar
-                 }
+                 if (slotDateTime < new Date()) status = 'past';
             }
-
             return { time, status };
         });
 
         res.status(200).json(availableSlots);
 
     } catch (error) {
-        console.error('Randevu slotları çekme hatası:', error);
-        res.status(500).send('Sunucu hatası.');
+        console.error('Randevu slotları çekme hatası (Detay):', error);
+        res.status(500).send('Sunucu hatası: ' + error.message);
     }
 };
 

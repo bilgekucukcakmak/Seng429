@@ -290,6 +290,21 @@ const handleDetailsClick = async (appointment) => {
         console.error("Hasta detayları çekilemedi:", error);
     }
 };
+
+const handleLeaveSubmit = async (e) => {
+    e.preventDefault();
+    try {
+        await createLeaveRequest(leaveFormData); // Talebi gönder
+        alert("İzin talebi başarıyla iletildi.");
+
+        // KRİTİK NOKTA: Listeyi hemen tekrar çek ki "Bekleyenler"e düşsün
+        fetchLeaveDates();
+
+        setLeaveFormData({ startDate: '', endDate: '', reason: '' }); // Formu temizle
+    } catch (error) {
+        console.error("Talep gönderilemedi:", error);
+    }
+};
 const fetchAppointments = async () => {
     if (!doctorUserId) return;
 
@@ -305,12 +320,12 @@ const fetchAppointments = async () => {
             const isPast = appointmentDateTime.getTime() < now.getTime() || app.status !== 'scheduled';
 
             return {
-                ...app,
-                patientName: `${app.patient_first_name || ''} ${app.patient_last_name || ''}`.trim() || 'Bilinmiyor',
-                // Backend'den gelen randevu tipini burada açıkça alıyoruz
-                appointmentType: app.appointmentType || "Muayene",
-                isPast
-            };
+                    ...app,
+                    patientName: `${app.patient_first_name || ''} ${app.patient_last_name || ''}`.trim() || 'Bilinmiyor',
+                    // Backend'den gelen veriyi güvenli bir şekilde al
+                    appointmentType: app.appointmentType || "Muayene",
+                    isPast
+                };
         });
 
         setAppointments(processedAppointments);
@@ -324,31 +339,60 @@ const fetchAppointments = async () => {
     }
 };
 
+// DoctorPage.jsx içinde, diğer fonksiyonların (handleSaveNote vb.) yanına ekle:
+const fetchDoctorProfile = async () => {
+    try {
+        setProfileLoading(true);
+        const response = await getDoctorProfile();
+        const data = response.data;
+
+        setProfileData(prev => ({
+            ...prev,
+            firstName: data.firstName || '',
+            lastName: data.lastName || '',
+            email: data.email || '',
+            specialization: data.specialization || 'Belirtilmedi',
+            title: data.title || 'Dr.',
+            education: data.education || [],
+            newPassword: '',
+            confirmNewPassword: ''
+        }));
+    } catch (error) {
+        console.error("Doktor profili alınamadı:", error);
+    } finally {
+        setProfileLoading(false);
+    }
+};
+
 useEffect(() => {
-      // useEffect dışına, bileşenin içine al:
-      const fetchLeaveDates = async () => {
-          setLeaveLoading(true);
-          try {
-              const response = await getDoctorLeaveDates();
-              const fetchedDates = response.data.leaveDates || [];
-              setLeaveDates(fetchedDates);
-          } catch (error) {
-              console.error("İzinler çekilemedi:", error);
-          } finally {
-              setLeaveLoading(false);
-          }
-      };
+    if (doctorUserId) {
+        fetchAppointments();
+        fetchLeaveDates();
+        fetchDoctorProfile(); // Artık dışarıda tanımlı olduğu için burada çalışır
+    }
+}, [doctorUserId]);
+// 1. Fonksiyonu useEffect dışına, bileşen seviyesine taşıyoruz
+const fetchLeaveDates = async () => {
+    try {
+        setLeaveLoading(true);
+        const response = await getDoctorLeaveDates();
+        // Gelen verinin dizi olduğundan emin olalım
+        const data = response.data.leaveDates || [];
+        console.log("Backend'den gelen ham veri:", data);
+        setLeaveDates(data);
+    } catch (error) {
+        console.error("Veri çekme hatası:", error);
+    } finally {
+        setLeaveLoading(false);
+    }
+};
 
-      // useEffect içinde sadece çağır:
-      useEffect(() => {
-          if (doctorUserId) { fetchLeaveDates(); }
-      }, [doctorUserId]);
-
-      if (doctorUserId) {
-          fetchLeaveDates();
-      }
-  }, [doctorUserId]);
-
+useEffect(() => {
+    if (doctorUserId) {
+        fetchLeaveDates();
+        fetchDoctorProfile(); // Profil bilgilerini de burada çağırabilirsin
+    }
+}, [doctorUserId]);
 
 
     // --- PROFİL YÖNETİMİ FONKSİYONLARI (YENİ EKLENDİ) ---
@@ -420,48 +464,67 @@ useEffect(() => {
         if (alreadyExists) { return alert("Bu tarih için zaten bir talebiniz veya onaylanmış izniniz bulunuyor."); }
 
         try {
-            setLeaveLoading(true);
+                setLeaveLoading(true);
+                // Backend'in doktor_id'yi bulması için isteği gönderiyoruz
+                await api.post('/doctor/leave-request', {
+                    startDate: dateString,
+                    endDate: dateString
+                });
 
-            // DİKKAT: Artık doğrudan profile değil, 'leave_requests' tablosuna kayıt atıyoruz
-            // Backend'de bu isteği karşılayan bir route (Örn: /doctor/leave-request) olmalı
-            await api.post('/doctor/leave-request', {
-                startDate: dateString,
-                endDate: dateString // Tek günlük izinler için başlangıç ve bitiş aynı
-            });
-
-            alert(`${formatDate(dateString)} tarihi için izin talebiniz yönetici onayına gönderildi.`);
-
-            // Listeyi yenilemek için verileri tekrar çek (böylece 'Bekliyor' sekmesinde görünür)
-            if (typeof fetchLeaveDates === 'function') {
-                fetchLeaveDates();
+                alert("Talebiniz iletildi.");
+                fetchLeaveDates(); // Listeyi yenile
+            } catch (error) {
+                console.error("Talep hatası:", error);
+            } finally {
+                setLeaveLoading(false);
             }
-        } catch (error) {
-            console.error("Talep gönderilirken hata:", error);
-            alert(error.response?.data?.message || "Talep iletilemedi.");
-        } finally {
-            setLeaveLoading(false);
-        }
-    };
+        };
+
+// İzinleri takvim formatına dönüştüren yardımcı fonksiyon
+const formattedLeaveEvents = leaveDates
+    .filter(leave => leave.status === 'approved') // Sadece onaylıları göster
+    .map(leave => ({
+        title: 'İzinli',
+        start: leave.date, // Veritabanındaki start_date
+        allDay: true,
+        backgroundColor: '#ef4444', // İzinli olduğu belli olsun (Kırmızı/Turuncu)
+        display: 'background' // Takvim kutucuğunu boyar
+    }));
+
 
     // --- İZİN KALDIRMA FONKSİYONU GÜNCELLENDİ ---
-    const handleRemoveLeave = async (dateString) => {
-        const newLeaveDates = leaveDates.filter(date => date !== dateString);
+  const handleRemoveLeave = async (dateInput) => {
+      // 1. Silinecek tarihin YYYY-MM-DD formatını hazırlayalım
+      const d = new Date(dateInput);
+      const dateKeyToDelete = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-        try {
-            setLeaveLoading(true); // Yükleme durumunu başlat
-            // API çağrısı ile veritabanına kaydet
-            await updateDoctorLeaveDates(newLeaveDates);
+      if (!window.confirm("Bu talebi iptal etmek istediğinize emin misiniz?")) return;
 
-            // Başarılı olursa state'i güncelle
-            setLeaveDates(newLeaveDates);
-            alert(`${formatDate(dateString)} için izin başarıyla kaldırıldı ve kaydedildi.`);
-        } catch (error) {
-            console.error("İzin kaldırılırken hata:", error);
-            alert("İzin kaldırılırken bir hata oluştu. Lütfen tekrar deneyin.");
-        } finally {
-            setLeaveLoading(false); // Yükleme durumunu bitir
-        }
-    };
+      try {
+          setLeaveLoading(true);
+
+          // 2. Backend'den siliyoruz
+          await api.delete(`/doctor/leave-request/${dateKeyToDelete}`);
+
+          // 3. ANLIK GÜNCELLEME: Ekrandaki listeyi filtreleyerek güncelle
+          setLeaveDates(prevDates => prevDates.filter(leave => {
+              // Mevcut izin objesinin tarihini de aynı formata çevirip karşılaştır
+              const currentItemDate = new Date(leave.date || leave);
+              const currentItemKey = `${currentItemDate.getFullYear()}-${String(currentItemDate.getMonth() + 1).padStart(2, '0')}-${String(currentItemDate.getDate()).padStart(2, '0')}`;
+
+              return currentItemKey !== dateKeyToDelete; // Eşleşmeyeni tut, eşleşeni (silineni) at
+          }));
+
+          alert("İptal edildi.");
+      } catch (error) {
+          console.error("Silme hatası:", error);
+          alert("Silerken bir hata oluştu.");
+          // Hata durumunda veriyi tekrar çekip listeyi garantiye alabilirsin
+          fetchLeaveDates();
+      } finally {
+          setLeaveLoading(false);
+      }
+  };
 
 
     useEffect(() => {
@@ -1008,16 +1071,14 @@ function renderDoctorActionArea() {
 
     // --- YENİ BİLEŞEN: İZİN YÖNETİMİ ---
    function renderLeaveManagement() {
-       // HATA: leaveRequests.filter(...) yazıyordu.
-       // DÜZELTME: Mevcut state'in olan leaveDates kullanılmalı.
-       const safeLeaves = Array.isArray(leaveDates) ? leaveDates : [];
+        const safeLeaves = Array.isArray(leaveDates) ? leaveDates : [];
 
        const filteredLeaves = safeLeaves.filter(req => {
-           // req bazen sadece string (tarih) bazen obje olabilir, ikisini de kontrol et
-           const status = req.status || 'approved'; // Eski sarı rozetler 'approved' sayılır
-           return status.toLowerCase() === leaveTab.toLowerCase();
+            const status = req.status ? req.status.toLowerCase() : 'pending';
+           return status === leaveTab.toLowerCase();
        });
 
+console.log("Mevcut Sekme:", leaveTab, "Gelen Veriler:", safeLeaves);
        return (
            <div style={{ maxWidth: '850px', margin: '0 auto', padding: '20px', animation: 'fadeIn 0.5s ease' }}>
                {/* ÜST BAŞLIK */}
@@ -1431,8 +1492,10 @@ const cancelButtonStyle = { padding: '12px 30px', backgroundColor: '#ecf0f1', co
             const dateKey = getShortDate(date);
             const schedule = FIXED_SCHEDULE[dayName];
             const appsCount = appsByDate[dateKey]?.length || 0;
-            const isLeaveDay = leaveDates.includes(dateKey); // İZİN KONTROLÜ
-
+            const isLeaveDay = leaveDates.some(l => {
+                const lDate = l.date ? new Date(l.date).toISOString().split('T')[0] : (typeof l === 'string' ? l : null);
+                return lDate === dateKey && l.status === 'approved';
+            });
             weekData.push({
                 date,
                 dayName,

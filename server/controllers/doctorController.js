@@ -12,19 +12,24 @@ const getDoctorId = async (userId) => {
     return rows.length > 0 ? rows[0].id : null;
 };
 
+// server/controllers/doctorController.js
+
 export const getAllDoctors = async (req, res) => {
     try {
         const [doctors] = await pool.execute(`
             SELECT
-                d.id AS doctor_id,
+                d.id AS doctor_id,   -- d.id'yi doctor_id olarak gönderiyoruz
+                d.user_id AS id,
                 d.first_name,
                 d.last_name,
                 d.specialization,
+                d.title,
                 u.email
             FROM doctors d
-            JOIN users u ON d.user_id = u.id
+            LEFT JOIN users u ON d.user_id = u.id -- u.id ile d.user_id eşleşmeli
         `);
 
+        console.log("Veritabanından çekilen doktor sayısı:", doctors.length);
         res.status(200).json(doctors);
     } catch (error) {
         console.error('Doktor listesi çekme hatası:', error);
@@ -32,25 +37,51 @@ export const getAllDoctors = async (req, res) => {
     }
 };
 
+// server/controllers/doctorController.js
+
+// server/controllers/doctorController.js
+// server/controllers/doctorController.js
+
+// TALEPLERİ LİSTELEME
 export const getDoctorLeaveDates = async (req, res) => {
     try {
-        // req.user.id üzerinden doğrudan doktorun onaylanmış izinlerini çekiyoruz
-        const [rows] = await pool.execute(
-            'SELECT leave_dates FROM doctors WHERE user_id = ?',
-            [req.user.id]
+        const userId = req.user.id; // ensureDoctor sayesinde burası dolu gelir
+
+        const [requests] = await pool.execute(
+            'SELECT start_date as date, status FROM leave_requests WHERE doctor_id = ?',
+            [userId]
         );
 
-        // Veritabanında JSON string olarak tutulan veriyi diziye çeviriyoruz
-        const leaveDates = rows[0]?.leave_dates
-            ? (typeof rows[0].leave_dates === 'string' ? JSON.parse(rows[0].leave_dates) : rows[0].leave_dates)
-            : [];
-
-        res.status(200).json({ leaveDates });
+        res.status(200).json({ leaveDates: requests });
     } catch (error) {
-        console.error('İzin getirme hatası:', error);
-        res.status(500).json({ message: 'İzinli günler getirilemedi.' });
+        console.error("SQL Hatası:", error);
+        res.status(500).json({ message: error.message });
     }
 };
+
+// YENİ TALEP OLUŞTURMA (500 Hatasını Çözen Kısım)
+// server/controllers/doctorController.js
+// server/controllers/doctorController.js
+
+export const deleteLeaveRequest = async (req, res) => {
+    const { date } = req.params; // Beklenen: "2026-04-14"
+    const userId = req.user.id;
+
+    try {
+        const [result] = await pool.execute(
+            'DELETE FROM leave_requests WHERE doctor_id = ? AND DATE(start_date) = ? AND status = "pending"',
+            [userId, date]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: "Silinecek kayıt bulunamadı." });
+        }
+        res.status(200).send("Başarıyla silindi.");
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // doctorController.js içindeki ilgili fonksiyon
 export const updateAppointmentNote = async (req, res) => {
     const { id } = req.params; // Randevu ID
@@ -187,20 +218,24 @@ export const updateDoctorProfile = async (req, res) => {
     }
 };
 
-// server/controllers/doctorController.js
+
 export const createLeaveRequest = async (req, res) => {
+    // Middleware'den (ensureDoctor) gelen userId'yi kullanıyoruz
+    const userId = req.user.id;
     const { startDate, endDate } = req.body;
-    const doctorId = req.user.id;
 
     try {
-        const query = `
-            INSERT INTO leave_requests (doctor_id, start_date, end_date, status, request_date)
-            VALUES (?, ?, ?, 'pending', CURRENT_TIMESTAMP)`;
+        // SQL sorgusunda kolon isimlerini (start_date, end_date)
+        // veritabanı şemana göre güncelledik.
+        await pool.execute(
+            'INSERT INTO leave_requests (doctor_id, start_date, end_date, status) VALUES (?, ?, ?, "pending")',
+            [userId, startDate, endDate]
+        );
 
-        await pool.execute(query, [doctorId, startDate, endDate]);
-        res.json({ message: "İzin talebi oluşturuldu." });
+        res.status(201).send("Talep başarıyla oluşturuldu.");
     } catch (error) {
-        res.status(500).json({ message: "Veritabanı hatası." });
+        console.error("Kayıt Hatası:", error);
+        res.status(500).json({ message: "Veritabanı hatası: " + error.message });
     }
 };
 
@@ -246,14 +281,15 @@ export const updateAppointmentStatus = async (req, res) => {
 };
 
 export const getMyLeaveRequests = async (req, res) => {
+    const userId = req.user.id; // Giriş yapan doktorun ID'si
     try {
-        const doctorId = req.user.id; // Giriş yapan doktorun ID'si
-        const [requests] = await pool.execute(
-            'SELECT * FROM leave_requests WHERE doctor_id = ? ORDER BY request_date DESC',
-            [doctorId]
+        const [rows] = await pool.execute(
+            `SELECT * FROM leave_requests
+             WHERE doctor_id = (SELECT id FROM doctors WHERE user_id = ?)`,
+            [userId]
         );
-        res.json(requests);
+        res.status(200).json(rows);
     } catch (error) {
-        res.status(500).json({ message: "Talepleriniz alınamadı." });
+        res.status(500).send("Talepleriniz yüklenemedi.");
     }
 };
